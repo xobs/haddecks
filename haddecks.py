@@ -122,8 +122,8 @@ _connectors = [
 ]
 
 class Platform(LatticePlatform):
-    def __init__(self, toolchain="trellis", architecture="45k", package="CABGA381"):
-        LatticePlatform.__init__(_io, connectors=_connectors)
+    def __init__(self, architecture="45k", package="CABGA381"):
+        LatticePlatform.__init__(self, device="45k", io=_io, connectors=_connectors, toolchain="trellis")
 
     def create_programmer(self):
         raise ValueError("{} programmer is not supported"
@@ -133,13 +133,16 @@ class Platform(LatticePlatform):
         LatticePlatform.do_finalize(self, fragment)
 
 class BaseSoC(SoCCore):
-    csr_peripherals = [
-        "cpu_or_bridge",
-    ]
-    csr_map_update(SoCCore.csr_map, csr_peripherals)
+    # csr_peripherals = [
+    #     "cpu_or_bridge",
+    # ]
+    # csr_map_update(SoCCore.csr_map, csr_peripherals)
 
     def __init__(self, platform, **kwargs):
         clk_freq = int(100e6)
+        SoCCore.__init__(self, platform, clk_freq,
+                         cpu_variant="linux+debug",
+                         **kwargs)
 
 def main():
     platform = Platform()
