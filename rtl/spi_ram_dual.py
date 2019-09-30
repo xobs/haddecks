@@ -11,6 +11,7 @@ from migen.genlib.misc import timeline
 
 from litex.gen import *
 
+from litex.soc.integration.doc import AutoDoc, ModuleDoc
 from litex.soc.interconnect import wishbone
 from litex.soc.cores.spi import SPIMaster
 
@@ -39,7 +40,7 @@ def _format_cmd(cmd, spi_width):
     return c
 
 
-class SpiRamDualQuad(Module):
+class SpiRamDualQuad(Module, AutoDoc, ModuleDoc):
     def __init__(self, pads_1, pads_2, dummy=5, endianness="big"):
         """
         Simple SPI flash.
@@ -51,13 +52,104 @@ class SpiRamDualQuad(Module):
         assert spi_width >= 2
         assert len(pads_1.dq) == len(pads_2.dq)
 
+        self.intro = ModuleDoc(title="SPI RAM", body="""
+        This device contains paired SPI RAM chips.  These are run in quad-SPI
+        mode (but not QPI), giving a total of 8 bits of parallel data.
+
+        This module performs memory-mapping by translating Wishbone calls into
+        SPI commands.  Reads get transformed into Quad-Fast-Read commands, and
+        writes get transformed into Quad-Write.
+        """)
+
+        self.reads = ModuleDoc(title="Data Reads", body="""
+        The SPI chip uses the following protocol to perform chip reads:
+
+        .. wavedrom::
+            :caption: Fast Read Operation
+
+            {
+                "signal": [
+                ["RAM0",
+                    {  "name": 'CLK',     "wave": 'xp.....................x', "data": ''   },
+                    {  "name": 'CS',      "wave": '10......................', "data": ''   },
+                    {  "name": 'SI',      "wave": 'x1..0101.222222xxxxxx22x', "data": '20 16 12 8 4 0 8 0'},
+                    {  "name": 'SO',      "wave": 'xxxxxxxxx222222xxxxxx22x', "data": '21 17 13 9 5 1 9 1'},
+                    {  "name": 'D2',      "wave": 'xxxxxxxxx222222xxxxxx22x', "data": '22 18 14 10 6 2 10 2'},
+                    {  "name": 'D3',      "wave": 'xxxxxxxxx222222xxxxxx22x', "data": '23 19 15 11 7 3 11 3'},
+                    {  "name": 'meaning', "wave": 'x2.......2.....2.....2.x', "data": ['cmd: 0xEB', 'address', 'HI-Z', 'data'] },
+                    ],
+                    {},
+                    ["RAM1",
+                    {  "name": 'CLK',     "wave": 'xp.....................x', "data": ''   },
+                    {  "name": 'CS',      "wave": '10......................', "data": ''   },
+                    {  "name": 'SI',      "wave": 'x1..0101.222222xxxxxx22x', "data": '20 16 12 8 4 0 12 4'},
+                    {  "name": 'SO',      "wave": 'xxxxxxxxx222222xxxxxx22x', "data": '21 17 13 9 5 1 13 5'},
+                    {  "name": 'D2',      "wave": 'xxxxxxxxx222222xxxxxx22x', "data": '22 18 14 10 6 2 14 6'},
+                    {  "name": 'D3',      "wave": 'xxxxxxxxx222222xxxxxx22x', "data": '23 19 15 11 7 3 15 7'},
+                    {  "name": 'meaning', "wave": 'x2.......2.....2.....2.x', "data": ['cmd: 0xEB', 'address', 'HI-Z', 'data'] },
+                    ]
+                ],
+                "head": { tick: -1 },
+                "foot": { tick: -1 }
+            }
+
+        This is a ``SPI Fast Read`` operation.  Any time something accesses the Wishbone bus,
+        it is transformed into an operation such as this.  The address is striped across the four
+        data lines, which is followed by a period of "dummy clock cycles" while the SPI device
+        fetches the data.  Finally, the data is made available.
+
+        There are two optimizations made here.  First, and most obvious, bits are striped
+        across two devices.  The address and command is the same for both chips, but the
+        actual bits are different.  This gets us 8 bits per clock cycle.
+
+        Second, if you attempt to read from two consecutive addresses, the ``CS`` line is not
+        deasserted and we simply continue to read data from the device.  This avoids about
+        20 clock cycles of overhead when doing sequential reads.
+        """)
+
+        self.write_doc = ModuleDoc(title="Data Writes", body="""
+        The following protocol is used when performing Wishbone writes:
+
+        .. wavedrom::
+            :caption: SPI Quad Write
+
+            {
+                "signal": [
+                    ["RAM0",
+                        {  "name": 'CLK',     "wave": 'xp...............x', "data": ''   },
+                        {  "name": 'CS',      "wave": '10................', "data": ''   },
+                        {  "name": 'SI',      "wave": 'x0.1..0..22222222x', "data": '20 16 12 8 4 0 8 0'},
+                        {  "name": 'SO',      "wave": 'xxxxxxxxx22222222x', "data": '21 17 13 9 5 1 9 1'},
+                        {  "name": 'D2',      "wave": 'xxxxxxxxx22222222x', "data": '22 18 14 10 6 2 10 2'},
+                        {  "name": 'D3',      "wave": 'xxxxxxxxx22222222x', "data": '23 19 15 11 7 3 11 3'},
+                        {  "name": 'meaning', "wave": 'x2.......2.....2.x', "data": ['cmd: 0x38', 'address', 'data'] },
+                    ],
+                    {},
+                    ["RAM1",
+                        {  "name": 'CLK',     "wave": 'xp...............x', "data": ''   },
+                        {  "name": 'CS',      "wave": '10................', "data": ''   },
+                        {  "name": 'SI',      "wave": 'x0.1..0..22222222x', "data": '20 16 12 8 4 0 8 0'},
+                        {  "name": 'SO',      "wave": 'xxxxxxxxx22222222x', "data": '21 17 13 9 5 1 13 5'},
+                        {  "name": 'D2',      "wave": 'xxxxxxxxx22222222x', "data": '22 18 14 10 6 2 14 6'},
+                        {  "name": 'D3',      "wave": 'xxxxxxxxx22222222x', "data": '23 19 15 11 7 3 15 7'},
+                        {  "name": 'meaning', "wave": 'x2.......2.....2.x', "data": ['cmd: 0x38', 'address', 'data'] },
+                    ]
+                ],
+                "head":{ tick:-1 },
+                "foot":{tick: -1}
+            }
+
+        Like Wishbone reads, there are two optimizations in use: Dual-chip operation
+        (yielding 8-bit parallel output), and continuous-write mode where the ``CS``
+        line is not deasserted at the end of a write in case the subsequent write is
+        to the following address.
+        """)
         # # #
 
         cs_n = Signal(reset=1)
         clk = Signal()
         dq_oe = Signal()
         wbone_width = len(bus.dat_r)
-
 
         read_cmd_params = {
             4: (_format_cmd(_QIOFR, 4), 4*8),
@@ -70,7 +162,6 @@ class SpiRamDualQuad(Module):
             1: _format_cmd(_WRITE, 1),
         }
         write_cmd = write_cmd_params[spi_width]
-        write_stage = Signal() # 0 during address stage, 1 during write stage
         addr_width = 24
 
         dq1 = TSTriple(spi_width)
@@ -84,8 +175,12 @@ class SpiRamDualQuad(Module):
         else:
             self.comb += bus.dat_r.eq(reverse_bytes(sr))
 
+        # This signal goes HIGH when the DQ outputs of both RAM chips
+        # should be ganged together.  This is used for writing addresses
+        # and commands.
         gang_outputs = Signal()
-        hw_read_logic = [
+
+        self.comb += [
             pads_1.clk.eq(clk),
             pads_1.cs_n.eq(cs_n),
             pads_2.clk.eq(clk),
@@ -100,34 +195,6 @@ class SpiRamDualQuad(Module):
             dq2.oe.eq(dq_oe),
         ]
 
-        self.comb += hw_read_logic
-
-        # if div < 2:
-        #     raise ValueError("Unsupported value \'{}\' for div parameter for SpiFlash core".format(div))
-        # else:
-        #     i = Signal(max=div)
-        #     dqi = Signal(spi_width*2)
-        #     dqo = Signal(spi_width*2)
-        #     self.sync += [
-        #         If(i == div//2 - 1,
-        #             clk.eq(1),
-        #             dqi.eq(Cat(dq1.i, dq2.i)),
-        #         ),
-        #         If(i == div - 1,
-        #             i.eq(0),
-        #             clk.eq(0),
-        #             If(bus.we & write_stage,
-        #                 # If we're writing, reuse the `dat_r` lines
-        #                 # as a temporary buffer to shift out the data.
-        #                 sr.eq(Cat(Signal(spi_width*2), sr[:-spi_width*2])),
-        #             ).Else(
-        #                 sr.eq(Cat(dqi, sr[:-spi_width*2]))
-        #             )
-        #         ).Else(
-        #             i.eq(i + 1),
-        #         ),
-        #     ]
-
         self.submodules.fsm = fsm = FSM()
         cycle_counter = Signal(5, reset_less=True)
         cycle_counter_reset = Signal()
@@ -141,12 +208,10 @@ class SpiRamDualQuad(Module):
                 cycle_counter.eq(cycle_counter + 1)
             )
 
-        print("cmd_width: {}  wbone_width: {}".format(cmd_width, wbone_width))
         fsm.act("IDLE",
             cycle_counter_reset.eq(1),
             If(bus.cyc & bus.stb,
                 NextState("SEND_CMD"),
-                NextValue(is_write, bus.we), # Cache the write value so we can speed up sequences
                 If(bus.we,
                     NextValue(sr, write_cmd),
                 ).Else(
@@ -160,6 +225,10 @@ class SpiRamDualQuad(Module):
             cs_n.eq(0),
             clk.eq(ClockSignal()),
             gang_outputs.eq(1),
+
+            # Cache the write value so we can speed up sequences
+            NextValue(is_write, bus.we),
+
             NextValue(sr, Cat(Signal(cmd_width - wbone_width + spi_width), sr)),
             If(cycle_counter == cmd_width//spi_width - 1,
                 cycle_counter_reset.eq(1),
@@ -226,8 +295,11 @@ class SpiRamDualQuad(Module):
             cs_n.eq(0),
             If(bus.cyc & bus.stb,
                 NextState("IDLE"),
+                # If the next command is a write, and the address
+                # is the next address, jump immediately to SEND_DATA
                 If(bus.adr == next_addr,
                     If(bus.we,
+                        NextValue(next_addr, bus.adr + 1),
                         NextState("SEND_DATA")
                     )
                 )
@@ -237,70 +309,13 @@ class SpiRamDualQuad(Module):
             cs_n.eq(0),
             If(bus.cyc & bus.stb,
                 NextState("IDLE"),
+                # If the next command is a read, and the address
+                # is the next address, jump immediately to RECV_DATA
                 If(bus.adr == next_addr,
                     If(~bus.we,
-                        NextState("RECV_DATA")
+                        NextValue(next_addr, bus.adr + 1),
+                        NextState("RECV_DATA"),
                     )
                 )
             )
         )
-        # # spi is byte-addressed, prefixed by zeroes
-        # z = Replicate(0, log2_int(wbone_width//8))
-        # seq = [
-        #     # Send the `read_cmd` out the port, reusing the
-        #     # Wishbone `rx` line as a temporary buffer
-        #     (cmd_width//spi_width*div,
-        #         [dq_oe.eq(1), cs_n.eq(0), sr[-cmd_width:].eq(read_cmd)]),
-        #     # Write the address out the port, again by reusing the
-        #     # Wishbone `rx` line as a temporary buffer
-        #     (addr_width//spi_width*div,
-        #         [sr[-addr_width:].eq(Cat(z, bus.adr))]),
-        #     # Wait for 8 clock cycles for the read to appear
-        #     ((dummy + wbone_width//spi_width)*div,
-        #         [dq_oe.eq(0)]),
-        #     (1,
-        #         [bus.ack.eq(1), cs_n.eq(1)]),
-        #     (div, # tSHSL!
-        #         [bus.ack.eq(0)]),
-        #     (0,
-        #         []),
-        # ]
-
-        # # accumulate timeline deltas
-        # t, rd_tseq = 0, []
-        # for dt, a in seq:
-        #     rd_tseq.append((t, a))
-        #     t += dt
-
-        # addr_stage = Signal()
-        # seq = [
-        #     # Send the `write_cmd` out the port
-        #     (cmd_width//spi_width*div,
-        #         [dq_oe.eq(1), cs_n.eq(0), sr[-cmd_width:].eq(write_cmd), write_stage.eq(0), addr_stage.eq(0)]),
-        #     # Write the address out the port, again by reusing the
-        #     # Wishbone `rx` line as a temporary buffer
-        #     (addr_width//spi_width*div,
-        #         [sr[-addr_width:].eq(Cat(z, bus.adr)), addr_stage.eq(1)]),
-        #     # Immediately write the data out
-        #     (1,
-        #         [write_stage.eq(1), sr.eq(bus.dat_w)]),
-        #     ((wbone_width//spi_width)*div,
-        #         []),
-        #     (1,
-        #         [bus.ack.eq(1), cs_n.eq(1), dq_oe.eq(0)]),
-        #     (div, # tSHSL!
-        #         [bus.ack.eq(0),]),
-        #     (0,
-        #         []),
-        # ]
-
-        # # accumulate timeline deltas
-        # t, wr_tseq = 0, []
-        # for dt, a in seq:
-        #     wr_tseq.append((t, a))
-        #     t += dt
-
-        # self.sync += [
-        #     timeline(bus.cyc & bus.stb & ~bus.we & (i == div - 1), rd_tseq),
-        #     timeline(bus.cyc & bus.stb &  bus.we & (i == div - 1), wr_tseq),
-        # ]
