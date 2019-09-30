@@ -17,27 +17,31 @@ from litex.build.generic_platform import Pins, IOStandard, Subsignal, Inverted, 
 from litex.soc.integration import SoCCore
 from litex.soc.integration.builder import Builder
 from litex.soc.integration.soc_core import csr_map_update
+from litex.soc.integration.doc import AutoDoc, ModuleDoc
+
+from valentyusb.usbcore.cpu.dummyusb import DummyUsb
+from valentyusb.usbcore import io as usbio
+
+from rtl.crg import _CRG
+from rtl.version import Version
 
 _io = [
     ("clk8", 0, Pins("U18"), IOStandard("LVCMOS33")),
     ("serial", 0,
-        Subsignal("rx", Pins("U2")),
-        Subsignal("tx", Pins("U1"), Misc("PULLUP")),
-        IOStandard("LVCMOS33")
+        Subsignal("rx", Pins("U2"), IOStandard("LVCMOS33")),
+        Subsignal("tx", Pins("U1"), IOStandard("LVCMOS33"), Misc("PULLMODE=UP")),
     ),
-    ("led", 0,
-        Subsignal("led1", Pins("E3"), IOStandard("LVCMOS33")),
-        Subsignal("led2", Pins("D3"), IOStandard("LVCMOS33")),
-        Subsignal("led3", Pins("C3"), IOStandard("LVCMOS33")),
-        Subsignal("led4", Pins("C4"), IOStandard("LVCMOS33")),
-        Subsignal("led5", Pins("C2"), IOStandard("LVCMOS33")),
-        Subsignal("led6", Pins("B1"), IOStandard("LVCMOS33")),
-        Subsignal("led7", Pins("B20"), IOStandard("LVCMOS33")),
-        Subsignal("led8", Pins("B19"), IOStandard("LVCMOS33")),
-        Subsignal("led9", Pins("A18"), IOStandard("LVCMOS33")),
-        Subsignal("led10", Pins("K20"), IOStandard("LVCMOS33")),
-        Subsignal("led11", Pins("K19"), IOStandard("LVCMOS33")),
-    ),
+    ("led", 1, Pins("E3"), IOStandard("LVCMOS33")),
+    ("led", 2, Pins("D3"), IOStandard("LVCMOS33")),
+    ("led", 3, Pins("C3"), IOStandard("LVCMOS33")),
+    ("led", 4, Pins("C4"), IOStandard("LVCMOS33")),
+    ("led", 5, Pins("C2"), IOStandard("LVCMOS33")),
+    ("led", 6, Pins("B1"), IOStandard("LVCMOS33")),
+    ("led", 7, Pins("B20"), IOStandard("LVCMOS33")),
+    ("led", 8, Pins("B19"), IOStandard("LVCMOS33")),
+    ("led", 9, Pins("A18"), IOStandard("LVCMOS33")),
+    ("led", 10, Pins("K20"), IOStandard("LVCMOS33")),
+    ("led", 11, Pins("K19"), IOStandard("LVCMOS33")),
     ("usb", 0,
         Subsignal("d_p", Pins("F3")),
         Subsignal("d_n", Pins("G3")),
@@ -112,6 +116,16 @@ _io = [
         Subsignal("scl", Pins("A16")),
         Subsignal("gpio", Pins("B18 A17 B16")),
         Subsignal("drm", Pins("C17")),
+    ),
+    ("testpts", 0,
+        Subsignal("a1", Pins("A15")),
+        Subsignal("a2", Pins("C16")),
+        Subsignal("a3", Pins("A14")),
+        Subsignal("a4", Pins("D16")),
+        Subsignal("b1", Pins("B15")),
+        Subsignal("b2", Pins("C15")),
+        Subsignal("b3", Pins("A13")),
+        Subsignal("b4", Pins("B13")),
     )
 ]
 
@@ -122,8 +136,8 @@ _connectors = [
 ]
 
 class Platform(LatticePlatform):
-    def __init__(self, architecture="45k", package="CABGA381"):
-        LatticePlatform.__init__(self, device="45k", io=_io, connectors=_connectors, toolchain="trellis")
+    def __init__(self):
+        LatticePlatform.__init__(self, device="lfe5u-45f-CABGA381", io=_io, connectors=_connectors, toolchain="trellis")
 
     def create_programmer(self):
         raise ValueError("{} programmer is not supported"
@@ -132,17 +146,65 @@ class Platform(LatticePlatform):
     def do_finalize(self, fragment):
         LatticePlatform.do_finalize(self, fragment)
 
-class BaseSoC(SoCCore):
-    # csr_peripherals = [
-    #     "cpu_or_bridge",
-    # ]
-    # csr_map_update(SoCCore.csr_map, csr_peripherals)
+class BaseSoC(SoCCore, AutoDoc):
+    SoCCore.csr_map = {
+        "ctrl":           0,  # provided by default (optional)
+        "crg":            1,  # user
+        "uart_phy":       2,  # provided by default (optional)
+        "uart":           3,  # provided by default (optional)
+        "identifier_mem": 4,  # provided by default (optional)
+        "timer0":         5,  # provided by default (optional)
+        "cpu_or_bridge":  8,
+        "usb":            9,
+        "touch":          11,
+        "reboot":         12,
+        "rgb":            13,
+        "version":        14,
+        "lxspi":          15,
+        "messible":       16,
+    }
 
     def __init__(self, platform, **kwargs):
-        clk_freq = int(100e6)
+        clk_freq = int(48e6)
         SoCCore.__init__(self, platform, clk_freq,
+                         cpu_type=None,
                          cpu_variant="linux+debug",
+                         integrated_sram_size=4096,
                          **kwargs)
+        self.submodules.crg = _CRG(self.platform)
+        self.submodules.version = Version("proto2", [
+            (0x02, "proto2", "Prototype Version 2 (red)")
+        ], 0)
+
+        usb_pads = platform.request("usb")
+        usb_iobuf = usbio.IoBuf(usb_pads.d_p, usb_pads.d_n, usb_pads.pullup)
+        self.submodules.usb = ClockDomainsRenamer({
+            "usb_48": "clk48",
+            "usb_12": "clk12",
+        })(DummyUsb(usb_iobuf, debug=True, product="Hackaday Supercon Badge"))
+        self.add_wb_master(self.usb.debug_bridge.wishbone)
+
+        led1 = platform.request("led", 1)
+        led2 = platform.request("led", 2)
+        led3 = platform.request("led", 3)
+        led4 = platform.request("led", 4)
+        counter_12 = Signal(26)
+        counter_48 = Signal(26)
+        self.sync.sys += counter_48.eq(counter_48 + 1)
+        self.sync.clk12 += counter_12.eq(counter_12 + 1)
+        self.comb += led1.eq(1)
+        self.comb += led2.eq(0)
+        self.comb += led3.eq(counter_48[25])
+        self.comb += led4.eq(counter_12[25])
+
+        testpts = platform.request("testpts")
+        self.comb += testpts.a1.eq(ClockSignal("sys"))
+        self.comb += testpts.b1.eq(ClockSignal("sys"))
+        self.comb += testpts.b4.eq(ClockSignal("clk12"))
+        self.comb += testpts.a4.eq(ClockSignal("clk12"))
+
+        self.platform.toolchain.build_template[1] += " --speed 8" # Add "speed grade 8" to nextpnr-ecp5
+        self.platform.toolchain.freq_constraints["sys"] = 48
 
 def main():
     platform = Platform()
