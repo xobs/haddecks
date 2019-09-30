@@ -25,9 +25,11 @@ from valentyusb.usbcore import io as usbio
 
 from rtl.crg import _CRG
 from rtl.version import Version
+from rtl.reboot import Reboot
 
 _io = [
     ("clk8", 0, Pins("U18"), IOStandard("LVCMOS33")),
+    ("programn", 0, Pins("R1"), IOStandard("LVCMOS33")),
     ("serial", 0,
         Subsignal("rx", Pins("U2"), IOStandard("LVCMOS33")),
         Subsignal("tx", Pins("U1"), IOStandard("LVCMOS33"), Misc("PULLMODE=UP")),
@@ -125,7 +127,7 @@ _io = [
         Subsignal("b2", Pins("C15")),
         Subsignal("b3", Pins("A13")),
         Subsignal("b4", Pins("B13")),
-    )
+    ),
 ]
 
 _connectors = [
@@ -191,6 +193,9 @@ class BaseSoC(SoCCore, AutoDoc):
         flash.add_clk_primitive(self.platform.device)
         self.submodules.lxspi = flash
         self.register_mem("spiflash", 0x03000000, self.lxspi.bus, size=16 * 1024 * 1024)
+
+        # Let us reboot the device
+        self.submodules.reboot = Reboot(platform.request("programn"))
 
         # Ensure timing is correctly set up
         self.platform.toolchain.build_template[1] += " --speed 8" # Add "speed grade 8" to nextpnr-ecp5
