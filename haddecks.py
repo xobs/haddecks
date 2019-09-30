@@ -31,6 +31,8 @@ from rtl.version import Version
 from rtl.reboot import Reboot
 from rtl.spi_ram import SpiRamQuad
 
+import lxsocdoc
+
 _io = [
     ("clk8", 0, Pins("U18"), IOStandard("LVCMOS33")),
     ("programn", 0, Pins("R1"), IOStandard("LVCMOS33")),
@@ -360,6 +362,7 @@ def main():
                             compile_gateware=compile_gateware)
     vns = builder.build()
     soc.do_exit(vns)
+    lxsocdoc.generate_docs(soc, "build/documentation", project_name="Hack a Day Supercon 2019 Badge", author="Sean \"xobs\" Cross")
 
 if __name__ == "__main__":
     main()
