@@ -8,11 +8,14 @@ LX_DEPENDENCIES = ["riscv", "nextpnr-ecp5", "yosys"]
 # Import lxbuildenv to integrate the deps/ directory
 import lxbuildenv
 
+import argparse
+
 # Disable pylint's E1101, which breaks completely on migen
 #pylint:disable=E1101
 
 from migen import *
 from litex.build.lattice import LatticePlatform
+from litex.build.sim.platform import SimPlatform
 from litex.build.generic_platform import Pins, IOStandard, Subsignal, Inverted, Misc
 from litex.soc.integration import SoCCore
 from litex.soc.integration.builder import Builder
@@ -26,6 +29,7 @@ from valentyusb.usbcore import io as usbio
 from rtl.crg import _CRG
 from rtl.version import Version
 from rtl.reboot import Reboot
+from rtl.spi_ram import SpiRamQuad
 
 _io = [
     ("clk8", 0, Pins("U18"), IOStandard("LVCMOS33")),
@@ -128,6 +132,22 @@ _io = [
         Subsignal("b3", Pins("A13")),
         Subsignal("b4", Pins("B13")),
     ),
+
+    # Only used for simulation
+    ("wishbone", 0,
+        Subsignal("adr",   Pins(30)),
+        Subsignal("dat_r", Pins(32)),
+        Subsignal("dat_w", Pins(32)),
+        Subsignal("sel",   Pins(4)),
+        Subsignal("cyc",   Pins(1)),
+        Subsignal("stb",   Pins(1)),
+        Subsignal("ack",   Pins(1)),
+        Subsignal("we",    Pins(1)),
+        Subsignal("cti",   Pins(3)),
+        Subsignal("bte",   Pins(2)),
+        Subsignal("err",   Pins(1))
+    ),
+    ("reset", 0, Pins(1), IOStandard("LVCMOS33")),
 ]
 
 _connectors = [
@@ -136,7 +156,45 @@ _connectors = [
     ("genio", "C5 B5 A5 C6 B6 A6 D6 C7 A7 C8 B8 A8 D9 C9 B9 A9 D10 C10 B10 A10 D11 C11 B11 A11 G18 H17 B12 A12 E17 C14"),
 ]
 
-class Platform(LatticePlatform):
+class CocotbPlatform(SimPlatform):
+    def __init__(self, toolchain="verilator"):
+        SimPlatform.__init__(self, "sim", _io, _connectors, toolchain="verilator")
+
+    def create_programmer(self):
+        raise ValueError("programming is not supported")
+
+    class _CRG(Module):
+        def __init__(self, platform):
+            clk8 = platform.request("clk8")
+            rst = platform.request("reset")
+
+            clk12 = Signal()
+
+            self.clock_domains.cd_sys = ClockDomain()
+            self.clock_domains.cd_clk12 = ClockDomain()
+            self.clock_domains.cd_clk48 = ClockDomain()
+            self.clock_domains.cd_clk48_to_clk12 = ClockDomain()
+
+            clk48 = clk8 # We actually run this at 48 MHz
+
+            self.comb += self.cd_clk48.clk.eq(clk48)
+            self.comb += self.cd_clk48_to_clk12.clk.eq(clk48)
+
+            clk12_counter = Signal(2)
+            self.sync.clk48_to_clk12 += clk12_counter.eq(clk12_counter + 1)
+
+            self.comb += clk12.eq(clk12_counter[1])
+
+            self.comb += self.cd_sys.clk.eq(clk48)
+            self.comb += self.cd_clk12.clk.eq(clk12)
+
+            self.comb += [
+                ResetSignal("sys").eq(rst),
+                ResetSignal("clk12").eq(rst),
+                ResetSignal("clk48").eq(rst),
+            ]
+
+class BadgePlatform(LatticePlatform):
     def __init__(self):
         LatticePlatform.__init__(self, device="LFE5U-45F-CABGA381", io=_io, connectors=_connectors, toolchain="trellis")
 
@@ -157,7 +215,8 @@ class BaseSoC(SoCCore, AutoDoc):
         "timer0":         5,  # provided by default (optional)
         "cpu_or_bridge":  8,
         "usb":            9,
-        "touch":          11,
+        "ram1":           10,
+        "ram2":           11,
         "reboot":         12,
         "rgb":            13,
         "version":        14,
@@ -165,14 +224,17 @@ class BaseSoC(SoCCore, AutoDoc):
         "messible":       16,
     }
 
-    def __init__(self, platform, **kwargs):
+    def __init__(self, platform, is_sim=False, **kwargs):
         clk_freq = int(48e6)
         SoCCore.__init__(self, platform, clk_freq,
                          cpu_type=None,
                          cpu_variant="linux+debug",
                          integrated_sram_size=4096,
                          **kwargs)
-        self.submodules.crg = _CRG(self.platform)
+        if is_sim:
+            self.submodules.crg = CocotbPlatform._CRG(self.platform)
+        else:
+            self.submodules.crg = _CRG(self.platform)
 
         # Add a "Version" module so we can see what version of the board this is.
         self.submodules.version = Version("proto2", [
@@ -189,22 +251,62 @@ class BaseSoC(SoCCore, AutoDoc):
         self.add_wb_master(self.usb.debug_bridge.wishbone)
 
         # Add the 16 MB SPI flash as XIP memory at address 0x03000000
-        flash = SpiFlashDualQuad(platform.request("spiflash4x"), dummy=5)
-        flash.add_clk_primitive(self.platform.device)
-        self.submodules.lxspi = flash
-        self.register_mem("spiflash", 0x03000000, self.lxspi.bus, size=16 * 1024 * 1024)
+        if not is_sim:
+            flash = SpiFlashDualQuad(platform.request("spiflash4x"), dummy=5)
+            flash.add_clk_primitive(self.platform.device)
+            self.submodules.lxspi = flash
+            self.register_mem("spiflash", 0x03000000, self.lxspi.bus, size=16 * 1024 * 1024)
+
+        # Add the 16 MB SPI flash as XIP memory at address 0x03000000
+        ram1 = SpiRamQuad(platform.request("spiram4x", 0), dummy=5)
+        self.submodules.ram1 = ram1
+        self.register_mem("ram1", 0x04000000, self.ram1.bus, size=8 * 1024 * 1024)
 
         # Let us reboot the device
         self.submodules.reboot = Reboot(platform.request("programn"))
 
         # Ensure timing is correctly set up
-        self.platform.toolchain.build_template[1] += " --speed 8" # Add "speed grade 8" to nextpnr-ecp5
-        self.platform.toolchain.freq_constraints["sys"] = 48
+        if not is_sim:
+            self.platform.toolchain.build_template[1] += " --speed 8" # Add "speed grade 8" to nextpnr-ecp5
+            self.platform.toolchain.freq_constraints["sys"] = 48
+
+        if is_sim:
+            class _WishboneBridge(Module):
+                def __init__(self, interface):
+                    self.wishbone = interface
+            self.add_cpu(_WishboneBridge(self.platform.request("wishbone")))
+            self.add_wb_master(self.cpu.wishbone)
+
 
 def main():
-    platform = Platform()
-    soc = BaseSoC(platform)
-    builder = Builder(soc, output_dir="build", csr_csv="build/csr.csv")
+    parser = argparse.ArgumentParser(description="Build the Hack a Day Supercon 2019 Badge firmware")
+    parser.add_argument(
+        "-D", "--document-only", action="store_true", help="don't build software or gateware, only build documentation",
+    )
+    parser.add_argument(
+        "--sim", help="generate files for simulation", action="store_true"
+    )
+    args = parser.parse_args()
+
+    compile_gateware = True
+    compile_software = True
+
+    if args.sim:
+        compile_gateware = False
+        compile_software = False
+        platform = CocotbPlatform()
+    else:
+        platform = BadgePlatform()
+
+    if args.document_only:
+        compile_gateware = False
+        compile_software = False
+
+    soc = BaseSoC(platform, is_sim=args.sim)
+    builder = Builder(soc, output_dir="build",
+                            csr_csv="build/csr.csv",
+                            compile_software=compile_software,
+                            compile_gateware=compile_gateware)
     vns = builder.build()
     soc.do_exit(vns)
 
