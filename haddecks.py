@@ -16,8 +16,9 @@ from litex.build.lattice import LatticePlatform
 from litex.build.generic_platform import Pins, IOStandard, Subsignal, Inverted, Misc
 from litex.soc.integration import SoCCore
 from litex.soc.integration.builder import Builder
-from litex.soc.integration.soc_core import csr_map_update
 from litex.soc.integration.doc import AutoDoc, ModuleDoc
+
+from litex.soc.cores.spi_flash import SpiFlashDualQuad
 
 from valentyusb.usbcore.cpu.dummyusb import DummyUsb
 from valentyusb.usbcore import io as usbio
@@ -82,17 +83,15 @@ _io = [
 		Subsignal("fmark", Pins("G1"), IOStandard("LVCMOS33")),
 		Subsignal("blen", Pins("P5"), IOStandard("LVCMOS33")),
     ),
-    ("spiflash", 0,
+    ("spiflash", 0, # clock needs to be accessed through USRMCLK
         Subsignal("cs_n", Pins("R2"), IOStandard("LVCMOS33")),
-        Subsignal("clk", Pins("U3"), IOStandard("LVCMOS33")),
         Subsignal("mosi", Pins("W2"), IOStandard("LVCMOS33")),
         Subsignal("miso", Pins("V2"), IOStandard("LVCMOS33")),
         Subsignal("wp",   Pins("Y2"), IOStandard("LVCMOS33")),
         Subsignal("hold", Pins("W1"), IOStandard("LVCMOS33")),
     ),
-    ("spiflash4x", 0,
+    ("spiflash4x", 0, # clock needs to be accessed through USRMCLK
         Subsignal("cs_n", Pins("R2"), IOStandard("LVCMOS33")),
-        Subsignal("clk",  Pins("U3"), IOStandard("LVCMOS33")),
         Subsignal("dq",   Pins("W2 V2 Y2 W1"), IOStandard("LVCMOS33")),
     ),
     ("spiram4x", 0,
@@ -137,7 +136,7 @@ _connectors = [
 
 class Platform(LatticePlatform):
     def __init__(self):
-        LatticePlatform.__init__(self, device="lfe5u-45f-CABGA381", io=_io, connectors=_connectors, toolchain="trellis")
+        LatticePlatform.__init__(self, device="LFE5U-45F-CABGA381", io=_io, connectors=_connectors, toolchain="trellis")
 
     def create_programmer(self):
         raise ValueError("{} programmer is not supported"
@@ -172,10 +171,13 @@ class BaseSoC(SoCCore, AutoDoc):
                          integrated_sram_size=4096,
                          **kwargs)
         self.submodules.crg = _CRG(self.platform)
+
+        # Add a "Version" module so we can see what version of the board this is.
         self.submodules.version = Version("proto2", [
             (0x02, "proto2", "Prototype Version 2 (red)")
         ], 0)
 
+        # Add a "USB" module to let us debug the device.
         usb_pads = platform.request("usb")
         usb_iobuf = usbio.IoBuf(usb_pads.d_p, usb_pads.d_n, usb_pads.pullup)
         self.submodules.usb = ClockDomainsRenamer({
@@ -184,25 +186,13 @@ class BaseSoC(SoCCore, AutoDoc):
         })(DummyUsb(usb_iobuf, debug=True, product="Hackaday Supercon Badge"))
         self.add_wb_master(self.usb.debug_bridge.wishbone)
 
-        led1 = platform.request("led", 1)
-        led2 = platform.request("led", 2)
-        led3 = platform.request("led", 3)
-        led4 = platform.request("led", 4)
-        counter_12 = Signal(26)
-        counter_48 = Signal(26)
-        self.sync.sys += counter_48.eq(counter_48 + 1)
-        self.sync.clk12 += counter_12.eq(counter_12 + 1)
-        self.comb += led1.eq(1)
-        self.comb += led2.eq(0)
-        self.comb += led3.eq(counter_48[25])
-        self.comb += led4.eq(counter_12[25])
+        # Add the 16 MB SPI flash as XIP memory at address 0x03000000
+        flash = SpiFlashDualQuad(platform.request("spiflash4x"), dummy=5)
+        flash.add_clk_primitive(self.platform.device)
+        self.submodules.lxspi = flash
+        self.register_mem("spiflash", 0x03000000, self.lxspi.bus, size=16 * 1024 * 1024)
 
-        testpts = platform.request("testpts")
-        self.comb += testpts.a1.eq(ClockSignal("sys"))
-        self.comb += testpts.b1.eq(ClockSignal("sys"))
-        self.comb += testpts.b4.eq(ClockSignal("clk12"))
-        self.comb += testpts.a4.eq(ClockSignal("clk12"))
-
+        # Ensure timing is correctly set up
         self.platform.toolchain.build_template[1] += " --speed 8" # Add "speed grade 8" to nextpnr-ecp5
         self.platform.toolchain.freq_constraints["sys"] = 48
 
