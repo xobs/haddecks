@@ -74,9 +74,7 @@ class HaddecksTest:
 @cocotb.test()
 def test_spiram_read(dut):
     harness = HaddecksTest(dut, inspect.currentframe().f_code.co_name)
-    dut._log.info("Resetting board...")
     yield harness.reset()
-    dut._log.info("Beginning read...")
     yield harness.read(0x04000000)
     yield harness.read(0x04000000)
 
@@ -84,9 +82,17 @@ def test_spiram_read(dut):
 def test_spiram_write(dut):
     harness = HaddecksTest(dut, inspect.currentframe().f_code.co_name)
     yield harness.reset()
+    yield harness.write(0x04000000, 0xf0f00f0f)
+    yield harness.write(0x04000000, 0x00000000)
     yield harness.write(0x04000000, 0xffffffff)
-    yield harness.write(0x0400000f, 0x00000000)
-    yield harness.write(0x0400000f, 0x00000001)
+
+
+@cocotb.test()
+def test_spiram_write_sequence(dut):
+    harness = HaddecksTest(dut, inspect.currentframe().f_code.co_name)
+    yield harness.reset()
+    yield harness.write(0x04000000, 0x55555555)
+    yield harness.write(0x04000004, 0x12345678)
 
 @cocotb.test()
 def test_spiram_read_write(dut):
