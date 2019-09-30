@@ -596,7 +596,8 @@ elif "LXBUILDENV_REEXEC" not in os.environ:
     try:
         sys.exit(subprocess.Popen(
             [sys.executable] + [sys.argv[0]] + rest).wait())
-    except:
+    except Exception as e:
+        print("Got exception: {}".format(e))
         sys.exit(1)
 else:
     # Overwrite the deps directory.
