@@ -30,6 +30,7 @@ from rtl.crg import _CRG
 from rtl.messible import Messible
 from rtl.reboot import Reboot
 from rtl.spi_ram import SpiRamQuad
+from rtl.spi_ram_dual import SpiRamDualQuad
 from rtl.version import Version
 
 import lxsocdoc
@@ -311,9 +312,9 @@ class BaseSoC(SoCCore, AutoDoc):
             self.register_mem("spiflash", 0x03000000, self.lxspi.bus, size=16 * 1024 * 1024)
 
         # Add the 16 MB SPI RAM at address 0x04000000
-        ram1 = SpiRamQuad(platform.request("spiram4x", 0), dummy=5)
-        self.submodules.ram1 = ram1
-        self.register_mem("ram1", 0x04000000, self.ram1.bus, size=8 * 1024 * 1024)
+        ram = SpiRamDualQuad(platform.request("spiram4x", 0), platform.request("spiram4x", 1), dummy=5)
+        self.submodules.ram = ram
+        self.register_mem("ram", 0x04000000, self.ram.bus, size=16 * 1024 * 1024)
 
         # Let us reboot the device
         self.submodules.reboot = Reboot(platform.request("programn"))
