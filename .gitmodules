@@ -13,3 +13,6 @@
 [submodule "deps/lxsocdoc"]
 	path = deps/lxsocdoc
 	url = https://github.com/xobs/lxsocdoc.git
+[submodule "deps/valentyusb"]
+	path = deps/valentyusb
+	url = https://github.com/im-tomu/valentyusb.git
