@@ -55,3 +55,4 @@ include $(shell cocotb-config --makefiles)/Makefile.sim
 $(PWD)/dut.v: ../haddecks.py
 	(cd ..; $(PYTHON) haddecks.py --sim --lx-ignore-deps)
 	mv ../build/gateware/dut.v dut.v
+	mv ../build/gateware/*.init .

@@ -2,7 +2,6 @@
 
 module tb(
 	input clk48,
-	output clk12,
 	input reset,
 	inout usb_d_p,
 	inout usb_d_n,
