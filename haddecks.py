@@ -27,9 +27,10 @@ from valentyusb.usbcore.cpu.dummyusb import DummyUsb
 from valentyusb.usbcore import io as usbio
 
 from rtl.crg import _CRG
-from rtl.version import Version
+from rtl.messible import Messible
 from rtl.reboot import Reboot
 from rtl.spi_ram import SpiRamQuad
+from rtl.version import Version
 
 import lxsocdoc
 
@@ -316,6 +317,9 @@ class BaseSoC(SoCCore, AutoDoc):
 
         # Let us reboot the device
         self.submodules.reboot = Reboot(platform.request("programn"))
+
+        # Add a Messible for sending messages to the host
+        self.submodules.messible = Messible()
 
         # Ensure timing is correctly set up
         if not is_sim:
