@@ -40,12 +40,10 @@ def _format_cmd(cmd, spi_width):
     return c
 
 
-class SpiRamDualQuad(Module, AutoDoc, ModuleDoc):
+class SpiRamDualQuad(Module, AutoDoc):
     def __init__(self, pads_1, pads_2, dummy=5, endianness="big"):
         """
-        Simple SPI flash.
-        Supports multi-bit pseudo-parallel reads (aka Dual or Quad I/O Fast
-        Read). Only supports mode0 (cpol=0, cpha=0).
+        Dual-chip SPI RAM
         """
         self.bus = bus = wishbone.Interface()
         spi_width = len(pads_1.dq)
