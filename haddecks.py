@@ -112,7 +112,7 @@ _io = [
     ("spiram4x", 1,
         Subsignal("cs_n", Pins("F20"), IOStandard("LVCMOS33")),
         Subsignal("clk",  Pins("J19"), IOStandard("LVCMOS33")),
-        Subsignal("dq",   Pins("J20 G19 G20 F19"), IOStandard("LVCMOS33")),
+        Subsignal("dq",   Pins("J20 G19 G20 H20"), IOStandard("LVCMOS33")),
     ),
     ("sao", 0,
         Subsignal("sda", Pins("B2")),
