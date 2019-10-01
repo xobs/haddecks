@@ -26,3 +26,10 @@ test/
 
 # Output from yosys
 abc.history
+
+# Simulation stuff
+sim/*.vcd
+sim/dut.v
+sim/*.init
+sim/results.xml
+sim/sim_build/
