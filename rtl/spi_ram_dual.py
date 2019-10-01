@@ -69,7 +69,7 @@ class SpiRamDualQuad(Module, AutoDoc):
                 "signal": [
                 ["RAM0",
                     {  "name": 'CLK',     "wave": 'xp.....................x', "data": ''   },
-                    {  "name": 'CS',      "wave": '10......................', "data": ''   },
+                    {  "name": 'CS',      "wave": '10.....................1', "data": ''   },
                     {  "name": 'SI',      "wave": 'x1..0101.222222xxxxxx22x', "data": '20 16 12 8 4 0 8 0'},
                     {  "name": 'SO',      "wave": 'xxxxxxxxx222222xxxxxx22x', "data": '21 17 13 9 5 1 9 1'},
                     {  "name": 'D2',      "wave": 'xxxxxxxxx222222xxxxxx22x', "data": '22 18 14 10 6 2 10 2'},
@@ -79,7 +79,7 @@ class SpiRamDualQuad(Module, AutoDoc):
                     {},
                     ["RAM1",
                     {  "name": 'CLK',     "wave": 'xp.....................x', "data": ''   },
-                    {  "name": 'CS',      "wave": '10......................', "data": ''   },
+                    {  "name": 'CS',      "wave": '10.....................1', "data": ''   },
                     {  "name": 'SI',      "wave": 'x1..0101.222222xxxxxx22x', "data": '20 16 12 8 4 0 12 4'},
                     {  "name": 'SO',      "wave": 'xxxxxxxxx222222xxxxxx22x', "data": '21 17 13 9 5 1 13 5'},
                     {  "name": 'D2',      "wave": 'xxxxxxxxx222222xxxxxx22x', "data": '22 18 14 10 6 2 14 6'},
@@ -96,13 +96,8 @@ class SpiRamDualQuad(Module, AutoDoc):
         data lines, which is followed by a period of "dummy clock cycles" while the SPI device
         fetches the data.  Finally, the data is made available.
 
-        There are two optimizations made here.  First, and most obvious, bits are striped
-        across two devices.  The address and command is the same for both chips, but the
-        actual bits are different.  This gets us 8 bits per clock cycle.
-
-        Second, if you attempt to read from two consecutive addresses, the ``CS`` line is not
-        deasserted and we simply continue to read data from the device.  This avoids about
-        20 clock cycles of overhead when doing sequential reads.
+        Bits are striped across two devices.  The address and command is the same for both chips,
+        but the actual bits are different.  This gets us 8 bits per clock cycle.
         """)
 
         self.write_doc = ModuleDoc(title="Data Writes", body="""
@@ -115,7 +110,7 @@ class SpiRamDualQuad(Module, AutoDoc):
                 "signal": [
                     ["RAM0",
                         {  "name": 'CLK',     "wave": 'xp...............x', "data": ''   },
-                        {  "name": 'CS',      "wave": '10................', "data": ''   },
+                        {  "name": 'CS',      "wave": '10...............1', "data": ''   },
                         {  "name": 'SI',      "wave": 'x0.1..0..22222222x', "data": '20 16 12 8 4 0 8 0'},
                         {  "name": 'SO',      "wave": 'xxxxxxxxx22222222x', "data": '21 17 13 9 5 1 9 1'},
                         {  "name": 'D2',      "wave": 'xxxxxxxxx22222222x', "data": '22 18 14 10 6 2 10 2'},
@@ -125,7 +120,7 @@ class SpiRamDualQuad(Module, AutoDoc):
                     {},
                     ["RAM1",
                         {  "name": 'CLK',     "wave": 'xp...............x', "data": ''   },
-                        {  "name": 'CS',      "wave": '10................', "data": ''   },
+                        {  "name": 'CS',      "wave": '10...............1', "data": ''   },
                         {  "name": 'SI',      "wave": 'x0.1..0..22222222x', "data": '20 16 12 8 4 0 8 0'},
                         {  "name": 'SO',      "wave": 'xxxxxxxxx22222222x', "data": '21 17 13 9 5 1 13 5'},
                         {  "name": 'D2',      "wave": 'xxxxxxxxx22222222x', "data": '22 18 14 10 6 2 14 6'},
@@ -137,10 +132,6 @@ class SpiRamDualQuad(Module, AutoDoc):
                 "foot":{tick: -1}
             }
 
-        Like Wishbone reads, there are two optimizations in use: Dual-chip operation
-        (yielding 8-bit parallel output), and continuous-write mode where the ``CS``
-        line is not deasserted at the end of a write in case the subsequent write is
-        to the following address.
         """)
         # # #
 
@@ -198,7 +189,7 @@ class SpiRamDualQuad(Module, AutoDoc):
         cycle_counter_reset = Signal()
         cycle_counter_ce = Signal()
         is_write = Signal()
-        next_addr = Signal(32)
+        next_addr = Signal(22)
         self.sync += \
             If(cycle_counter_reset,
                 cycle_counter.eq(0)
@@ -208,6 +199,8 @@ class SpiRamDualQuad(Module, AutoDoc):
 
         fsm.act("IDLE",
             cycle_counter_reset.eq(1),
+            cs_n.eq(1),
+            clk.eq(0),
             If(bus.cyc & bus.stb,
                 NextState("SEND_CMD"),
                 If(bus.we,
@@ -217,6 +210,7 @@ class SpiRamDualQuad(Module, AutoDoc):
                 ),
             )
         )
+
         fsm.act("SEND_CMD",
             cycle_counter_ce.eq(1),
             dq_oe.eq(1),
@@ -230,9 +224,14 @@ class SpiRamDualQuad(Module, AutoDoc):
             NextValue(sr, Cat(Signal(cmd_width - wbone_width + spi_width), sr)),
             If(cycle_counter == cmd_width//spi_width - 1,
                 cycle_counter_reset.eq(1),
-                # Strip off the bottom address bit, since we're striping across two chips.
-                NextValue(sr, bus.adr << 1),
-                # However, Litex Wishbone addresses are missing the bottom two bits,
+                # Wishbone addresses are 32-bits.  Litex Wishbone addresses are 30 bits.
+                # SPI flash addreses are 24 bits.
+                # We are striping across two devices.
+                # To turn a Wishbone address into a SPI address, shift left by 8.
+                # Therefore, to turn a Litex address into a SPI address, shift left by 10.
+                # However, we're striping across two chips, so shift left by 9.
+                NextValue(sr, bus.adr << 9),
+                # Litex Wishbone addresses are missing the bottom two bits,
                 # so the next address to read is just bus.adr + 1.
                 NextValue(next_addr, bus.adr + 1),
                 NextState("SEND_ADDR"),
@@ -263,7 +262,7 @@ class SpiRamDualQuad(Module, AutoDoc):
             NextValue(sr, Cat(Signal(cmd_width - wbone_width + (spi_width * 2)), sr)),
             If(cycle_counter == wbone_width//spi_width//2 - 1,
                 cycle_counter_reset.eq(1),
-                NextState("WAIT_SEND_MORE"),
+                NextState("IDLE"),
                 bus.ack.eq(1),
             ),
         )
@@ -272,7 +271,7 @@ class SpiRamDualQuad(Module, AutoDoc):
             dq_oe.eq(0),
             cs_n.eq(0),
             clk.eq(ClockSignal()),
-            If(cycle_counter == dummy,
+            If(cycle_counter == dummy - 1,
                 cycle_counter_reset.eq(1),
                 NextState("RECV_DATA"),
             ),
@@ -282,38 +281,12 @@ class SpiRamDualQuad(Module, AutoDoc):
             dq_oe.eq(0),
             cs_n.eq(0),
             clk.eq(ClockSignal()),
-            NextValue(sr, Cat(dq1.i, dq2.i, sr[:-spi_width*2])),
-            If(cycle_counter == wbone_width//spi_width//2,
+            If(cycle_counter == wbone_width//spi_width//2 + 1,
                 cycle_counter_reset.eq(1),
-                NextState("WAIT_RECV_MORE"),
                 bus.ack.eq(1),
+                cs_n.eq(1),
+                NextState("IDLE"),
+            ).Else(
+                NextValue(sr, Cat(dq2.i, dq1.i, sr[:-spi_width*2])),
             ),
-        )
-        fsm.act("WAIT_SEND_MORE",
-            cs_n.eq(0),
-            If(bus.cyc & bus.stb,
-                NextState("IDLE"),
-                # If the next command is a write, and the address
-                # is the next address, jump immediately to SEND_DATA
-                If(bus.adr == next_addr,
-                    If(bus.we,
-                        NextValue(next_addr, bus.adr + 1),
-                        NextState("SEND_DATA")
-                    )
-                )
-            )
-        )
-        fsm.act("WAIT_RECV_MORE",
-            cs_n.eq(0),
-            If(bus.cyc & bus.stb,
-                NextState("IDLE"),
-                # If the next command is a read, and the address
-                # is the next address, jump immediately to RECV_DATA
-                If(bus.adr == next_addr,
-                    If(~bus.we,
-                        NextValue(next_addr, bus.adr + 1),
-                        NextState("RECV_DATA"),
-                    )
-                )
-            )
         )
