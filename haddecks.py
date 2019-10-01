@@ -27,6 +27,7 @@ from valentyusb.usbcore.cpu.dummyusb import DummyUsb
 from valentyusb.usbcore import io as usbio
 
 from rtl.crg import _CRG
+from rtl.lcdif import LCDIF
 from rtl.messible import Messible
 from rtl.reboot import Reboot
 from rtl.spi_ram import SpiRamQuad
@@ -267,10 +268,8 @@ class BaseSoC(SoCCore, AutoDoc):
         "uart":           3,  # provided by default (optional)
         "identifier_mem": 4,  # provided by default (optional)
         "timer0":         5,  # provided by default (optional)
-        "cpu_or_bridge":  8,
+        "lcdif":          8,
         "usb":            9,
-        "ram1":           10,
-        "ram2":           11,
         "reboot":         12,
         "rgb":            13,
         "version":        14,
@@ -282,7 +281,7 @@ class BaseSoC(SoCCore, AutoDoc):
         clk_freq = int(48e6)
         SoCCore.__init__(self, platform, clk_freq,
                          cpu_type=None,
-                         cpu_variant="linux+debug",
+                         cpu_variant=None,
                          integrated_sram_size=4096,
                          **kwargs)
         if is_sim:
@@ -322,17 +321,16 @@ class BaseSoC(SoCCore, AutoDoc):
         # Add a Messible for sending messages to the host
         self.submodules.messible = Messible()
 
+        # Add an LCD so we can see what's up
+        self.submodules.lcdif = LCDIF(platform.request("lcd"))
+
         # Ensure timing is correctly set up
         if not is_sim:
             self.platform.toolchain.build_template[1] += " --speed 8" # Add "speed grade 8" to nextpnr-ecp5
             self.platform.toolchain.freq_constraints["sys"] = 48
 
         if is_sim:
-            class _WishboneBridge(Module):
-                def __init__(self, interface):
-                    self.wishbone = interface
-            self.add_cpu(_WishboneBridge(self.platform.request("wishbone")))
-            self.add_wb_master(self.cpu.wishbone)
+            self.add_wb_master(self.platform.request("wishbone"))
 
 
 def main():
