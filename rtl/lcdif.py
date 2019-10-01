@@ -27,9 +27,16 @@ class LCDIF(Module, AutoCSR, AutoDoc):
             CSRField("startcmd", description="???")
         ])
         self.response = CSRStorage(8, description="Response data after reading from the device.")
+        self.tpg = CSRStorage(1, description="Test pattern generators", fields=[
+            CSRField("rainbow")
+        ])
+
+        self.submodules.wheel = Wheel()
+        idx_counter = Signal(16)
 
         # Data pins
-        d = Signal(18)
+        d = TSTriple(len(pads.db))
+        self.specials.d = d.get_tristate(pads.db)
 
         # D/CX (If 1, this is a data packet, otherwise it's a command packet)
         dcx = Signal()
@@ -49,7 +56,6 @@ class LCDIF(Module, AutoCSR, AutoDoc):
             pads.cs.eq(self.ctrl.fields.cs),
             pads.rst.eq(~self.ctrl.fields.reset),
             pads.blen.eq(self.ctrl.fields.bl),
-            pads.db.eq(d),
             pads.rs.eq(dcx),
             pads.wr.eq(wrx),
             pads.rd.eq(rdx),
@@ -61,28 +67,37 @@ class LCDIF(Module, AutoCSR, AutoDoc):
         fsm.act("IDLE",
             wrx.eq(1),
             rdx.eq(1),
-            NextValue(self.response.storage, d),
             If(self.cmd.re,
                 wrx.eq(0),
-                d.eq(self.cmd.storage),
+                d.o.eq(self.cmd.storage),
+                d.oe.eq(1),
                 NextState("SEND_CMD"),
             ).Elif(self.data.re,
                 wrx.eq(0),
                 dcx.eq(1),
-                d.eq(self.data.storage),
+                d.o.eq(self.data.storage),
+                d.oe.eq(1),
                 NextState("SEND_DATA"),
             ).Elif(self.ctrl.fields.read,
                 rdx.eq(0),
                 dcx.eq(1),
+                d.oe.eq(0),
                 NextState("READ_DATA"),
-            ),
+            ).Elif(self.tpg.fields.rainbow,
+                wrx.eq(0),
+                d.o.eq(0x2c),
+                d.oe.eq(1),
+                NextValue(idx_counter, 1),
+                NextState("START_SEND_RAINBOW"),
+            )
         )
 
         fsm.act("SEND_DATA",
             dcx.eq(1),
             wrx.eq(1),
             rdx.eq(1),
-            d.eq(self.data.storage),
+            d.o.eq(self.data.storage),
+            d.oe.eq(1),
             NextState("IDLE"),
         )
 
@@ -90,7 +105,8 @@ class LCDIF(Module, AutoCSR, AutoDoc):
             dcx.eq(0),
             wrx.eq(1),
             rdx.eq(1),
-            d.eq(self.cmd.storage),
+            d.o.eq(self.cmd.storage),
+            d.oe.eq(1),
             NextState("IDLE"),
         )
 
@@ -98,5 +114,83 @@ class LCDIF(Module, AutoCSR, AutoDoc):
             dcx.eq(1),
             wrx.eq(1),
             rdx.eq(1),
+            d.oe.eq(0),
+            NextValue(self.response.storage, d.i),
             NextState("IDLE"),
         )
+
+        offset_counter = Signal(16)
+        fsm.act("START_SEND_RAINBOW",
+            wrx.eq(1),
+            rdx.eq(1),
+            dcx.eq(1),
+            d.o.eq(0x2c),
+            d.oe.eq(1),
+            NextState("SEND_RAINBOW")
+        )
+
+        fsm.act("SEND_RAINBOW",
+            dcx.eq(1),
+            rdx.eq(1),
+            wrx.eq(idx_counter[0]),
+            self.wheel.pos.eq(idx_counter[6:] + offset_counter[15:]),
+            If(idx_counter > 320 * 2,
+                NextValue(idx_counter, 0)
+            ).Else(
+                NextValue(idx_counter, idx_counter + 1 + pads.fmark),
+            ),
+            NextValue(offset_counter, offset_counter + 1),
+            d.oe.eq(1),
+            d.o.eq(Cat(self.wheel.r[0:6], self.wheel.g[0:6], self.wheel.b[0:6])),
+            If(~self.tpg.fields.rainbow,
+                NextState("IDLE"),
+            ),
+        )
+
+class Wheel(Module):
+    """Color wheel
+
+    Generate an RGB value from a given wheel index (0-255)
+    """
+    def __init__(self):
+        self.pos = Signal(8)
+        self.r = Signal(8)
+        self.g = Signal(8)
+        self.b = Signal(8)
+
+        pos_1 = Signal(8)
+        pos_1_n = Signal(8)
+        pos_check = Signal(8)
+        pos_2 = Signal(8)
+        pos_2_n = Signal(8)
+        pos_3 = Signal(8)
+        pos_3_n = Signal(8)
+        # Input a value 0 to 255 to get a color value.
+        # The colours are a transition r - g - b - back to r.
+        self.comb += [
+            pos_check.eq(255 - self.pos),
+
+            pos_1.eq(pos_check * 3),
+            pos_1_n.eq(255 - pos_1),
+
+            pos_2.eq((pos_check - 85) * 3),
+            pos_2_n.eq(255 - pos_2),
+
+            pos_3.eq((pos_check - 170) * 3),
+            pos_3_n.eq(255 - pos_3),
+
+            If(pos_check < 85,
+                self.r.eq(pos_1_n),
+                self.g.eq(0),
+                self.b.eq(pos_1),
+            ).Elif(pos_check < 170,
+                self.r.eq(0),
+                self.g.eq(pos_2),
+                self.b.eq(pos_2_n),
+            )
+            .Else(
+                self.r.eq(pos_3),
+                self.g.eq(pos_3_n),
+                self.b.eq(0),
+            )
+        ]
