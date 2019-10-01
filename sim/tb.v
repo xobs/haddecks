@@ -49,6 +49,24 @@ dut dut (
 	.wishbone_err(wishbone_err)
 );
 
+spiram ramchip1 (
+	.csn(spiram4x0_cs_n),
+	.clk(spiram4x0_clk),
+	.io0(spiram4x0_dq[0]), // MOSI
+	.io1(spiram4x0_dq[1]), // MISO
+	.io2(spiram4x0_dq[2]),
+	.io3(spiram4x0_dq[3])
+);
+
+spiram ramchip2 (
+	.csn(spiram4x1_cs_n),
+	.clk(spiram4x1_clk),
+	.io0(spiram4x1_dq[0]), // MOSI
+	.io1(spiram4x1_dq[1]), // MISO
+	.io2(spiram4x1_dq[2]),
+	.io3(spiram4x1_dq[3])
+);
+
   // Dump waves
   initial begin
     $dumpfile("dump.vcd");

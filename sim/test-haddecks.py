@@ -88,6 +88,15 @@ def test_spiram_write(dut):
 
 
 @cocotb.test()
+def test_spiram_write_random(dut):
+    harness = HaddecksTest(dut, inspect.currentframe().f_code.co_name)
+    yield harness.reset()
+    yield harness.write(0x04000000, 0xf0f00f0f)
+    yield harness.write(0x04000010, 0x00000000)
+    yield harness.write(0x0400005c, 0xffffffff)
+
+
+@cocotb.test()
 def test_spiram_write_sequence(dut):
     harness = HaddecksTest(dut, inspect.currentframe().f_code.co_name)
     yield harness.reset()
@@ -100,3 +109,12 @@ def test_spiram_read_write(dut):
     yield harness.reset()
     yield harness.read(0x04000000)
     yield harness.write(0x04000000, 0x98765432)
+
+@cocotb.test()
+def test_spiram_readback(dut):
+    harness = HaddecksTest(dut, inspect.currentframe().f_code.co_name)
+    yield harness.reset()
+    yield harness.write(0x04000000, 0x98765432)
+    val = yield harness.read(0x04000000)
+    if val != 0x98765432:
+        raise TestFailure("Reading @ 0x04000000, expected 0x{:08x}, got {:08x}".format(0x98765432, val))

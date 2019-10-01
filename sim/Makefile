@@ -43,7 +43,7 @@ endif
 
 PYTHON ?= python3
 
-VERILOG_SOURCES = $(WPWD)/dut.v $(WPWD)/tb.v
+VERILOG_SOURCES = $(WPWD)/dut.v $(WPWD)/tb.v $(WPWD)/spiram.v
 TOPLEVEL = tb
 MODULE = test-haddecks
 
