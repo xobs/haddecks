@@ -28,7 +28,8 @@ class LCDIF(Module, AutoCSR, AutoDoc):
         ])
         self.response = CSRStorage(8, description="Response data after reading from the device.")
         self.tpg = CSRStorage(1, description="Test pattern generators", fields=[
-            CSRField("rainbow")
+            CSRField("bluething", description="Kinda pretty blue display"),
+            CSRField("rainbow", description="RGB pattern test"),
         ])
 
         self.submodules.wheel = Wheel()
@@ -89,6 +90,12 @@ class LCDIF(Module, AutoCSR, AutoDoc):
                 d.oe.eq(1),
                 NextValue(idx_counter, 1),
                 NextState("START_SEND_RAINBOW"),
+            ).Elif(self.tpg.fields.bluething,
+                wrx.eq(0),
+                d.o.eq(0x2c),
+                d.oe.eq(1),
+                NextValue(idx_counter, 1),
+                NextState("START_SEND_BLUETHING"),
             )
         )
 
@@ -120,7 +127,12 @@ class LCDIF(Module, AutoCSR, AutoDoc):
         )
 
         offset_counter = Signal(16)
+        x = Signal(9)
+        y = Signal(9)
+
         fsm.act("START_SEND_RAINBOW",
+            NextValue(x, 0),
+            NextValue(y, 0),
             wrx.eq(1),
             rdx.eq(1),
             dcx.eq(1),
@@ -133,6 +145,50 @@ class LCDIF(Module, AutoCSR, AutoDoc):
             dcx.eq(1),
             rdx.eq(1),
             wrx.eq(idx_counter[0]),
+            NextValue(idx_counter, idx_counter + 1),
+
+            # If the bottom bit is set, then increment X and/or Y.
+            # We do it this way because of how the LCD encoding works.
+            If(idx_counter[0],
+                If(x < 479,
+                    NextValue(x, x + 1)
+                ).Else(
+                    NextValue(x, 0),
+                    If(y < 319,
+                        NextValue(y, y + 1),
+                    ).Else(
+                        NextValue(y, 0),
+                    )
+                ),
+            ),
+
+            # Assign the actual pixel data
+            If(y < 90,
+                d.o.eq(Cat(x[0:5], Signal(6), Signal(5)))
+            ).Elif(y < 180,
+                d.o.eq(Cat(Signal(5), x[0:6], Signal(6)))
+            ).Else(
+                d.o.eq(Cat(Signal(5), Signal(6), x[0:5]))
+            ),
+            d.oe.eq(1),
+            If(~self.tpg.fields.rainbow,
+                NextState("IDLE"),
+            ),
+        )
+
+        fsm.act("START_SEND_BLUETHING",
+            wrx.eq(1),
+            rdx.eq(1),
+            dcx.eq(1),
+            d.o.eq(0x2c),
+            d.oe.eq(1),
+            NextState("SEND_BLUETHING")
+        )
+
+        fsm.act("SEND_BLUETHING",
+            dcx.eq(1),
+            rdx.eq(1),
+            wrx.eq(idx_counter[0]),
             self.wheel.pos.eq(idx_counter[6:] + offset_counter[15:]),
             If(idx_counter > 320 * 2,
                 NextValue(idx_counter, 0)
@@ -142,7 +198,7 @@ class LCDIF(Module, AutoCSR, AutoDoc):
             NextValue(offset_counter, offset_counter + 1),
             d.oe.eq(1),
             d.o.eq(Cat(self.wheel.r[0:6], self.wheel.g[0:6], self.wheel.b[0:6])),
-            If(~self.tpg.fields.rainbow,
+            If(~self.tpg.fields.bluething,
                 NextState("IDLE"),
             ),
         )
