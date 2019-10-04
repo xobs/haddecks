@@ -41,7 +41,7 @@ def _format_cmd(cmd, spi_width):
 
 
 class SpiRamDualQuad(Module, AutoDoc):
-    def __init__(self, pads_1, pads_2, dummy=5, endianness="big", reset_cycles=2**14-1, quad=False):
+    def __init__(self, pads_1, pads_2, dummy=5, endianness="big", reset_cycles=2**14-1, qpi=False):
         """
         Dual-chip SPI RAM
         """
@@ -204,17 +204,18 @@ class SpiRamDualQuad(Module, AutoDoc):
             )
 
         fsm.act("INIT_0",
-            cycle_counter_reset.eq(1),
             cs_n.eq(1),
             clk.eq(0),
             dq_oe.eq(1),
             startup_delay_ce.eq(1),
             If(startup_delay == 0,
+                cs_n.eq(1),
                 cycle_counter_reset.eq(1),
                 NextValue(sr, _format_cmd(0x66, 4)), # Enable Reset
                 NextState("INIT_1"),
             ),
         )
+
         fsm.act("INIT_1",
             cycle_counter_ce.eq(1),
             dq_oe.eq(1),
@@ -224,8 +225,6 @@ class SpiRamDualQuad(Module, AutoDoc):
 
             NextValue(sr, Cat(Signal(cmd_width - wbone_width + spi_width), sr)),
             If(cycle_counter == cmd_width//spi_width - 1,
-                cycle_counter_reset.eq(1),
-                cs_n.eq(1),
                 NextState("INIT_2"),
             ),
         )
@@ -245,18 +244,15 @@ class SpiRamDualQuad(Module, AutoDoc):
 
             NextValue(sr, Cat(Signal(cmd_width - wbone_width + spi_width), sr)),
             If(cycle_counter == cmd_width//spi_width - 1,
-                cycle_counter_reset.eq(1),
-                cs_n.eq(1),
                 NextState("INIT_4"),
             ),
         )
 
-        if quad:
+        if qpi:
             fsm.act("INIT_4",
                 cs_n.eq(1),
                 cycle_counter_reset.eq(1),
                 NextValue(sr, _format_cmd(0x35, 4)), # Enable QPI mode
-                # NextValue(sr, 0xF5000000), # Disable QPI mode
                 NextState("INIT_5"),
             )
             fsm.act("INIT_5",
@@ -268,17 +264,12 @@ class SpiRamDualQuad(Module, AutoDoc):
 
                 NextValue(sr, Cat(Signal(cmd_width - wbone_width + spi_width), sr)),
                 If(cycle_counter == cmd_width//spi_width - 1,
-                # NextValue(sr, Cat(Signal(spi_width), sr)),
-                # If(cycle_counter == 8//spi_width - 1,
-                    cycle_counter_reset.eq(1),
-                    cs_n.eq(1),
                     NextState("IDLE"),
                 ),
             )
             cmd_width = 2*4
             read_cmd = _QIOFR
             write_cmd = _QIOW
-
         else:
             fsm.act("INIT_4",
                 cs_n.eq(1),
@@ -295,13 +286,11 @@ class SpiRamDualQuad(Module, AutoDoc):
 
                 NextValue(sr, Cat(Signal(spi_width), sr)),
                 If(cycle_counter == 8//spi_width - 1,
-                    cycle_counter_reset.eq(1),
-                    cs_n.eq(1),
                     NextState("IDLE"),
                 ),
             )
 
-        if quad:
+        if qpi:
             write_cmd = Cat(Signal(24), write_cmd)
             read_cmd = Cat(Signal(24), read_cmd)
         fsm.act("IDLE",
