@@ -9,6 +9,7 @@ LX_DEPENDENCIES = ["riscv", "nextpnr-ecp5", "yosys"]
 import lxbuildenv
 
 import argparse
+import os
 
 # Disable pylint's E1101, which breaks completely on migen
 #pylint:disable=E1101
@@ -33,6 +34,7 @@ from rtl.reboot import Reboot
 from rtl.spi_ram import SpiRamQuad
 from rtl.spi_ram_dual import SpiRamDualQuad
 from rtl.version import Version
+from rtl.picorvspi import PicoRVSpi
 
 import lxsocdoc
 
@@ -268,6 +270,7 @@ class BaseSoC(SoCCore, AutoDoc):
         "uart":           3,  # provided by default (optional)
         "identifier_mem": 4,  # provided by default (optional)
         "timer0":         5,  # provided by default (optional)
+        "picorvspi":      7,
         "lcdif":          8,
         "usb":            9,
         "reboot":         12,
@@ -277,12 +280,12 @@ class BaseSoC(SoCCore, AutoDoc):
         "messible":       16,
     }
 
-    def __init__(self, platform, is_sim=False, **kwargs):
+    def __init__(self, platform, is_sim=False, debug=True, **kwargs):
         clk_freq = int(48e6)
         SoCCore.__init__(self, platform, clk_freq,
-                         cpu_type=None,
-                         cpu_variant=None,
-                         integrated_sram_size=4096,
+                         integrated_rom_size=16384,
+                         integrated_sram_size=65536,
+                        #  wishbone_timeout_cycles=1e8,
                          **kwargs)
         if is_sim:
             self.submodules.crg = CocotbPlatform._CRG(self.platform)
@@ -300,20 +303,30 @@ class BaseSoC(SoCCore, AutoDoc):
         self.submodules.usb = ClockDomainsRenamer({
             "usb_48": "clk48",
             "usb_12": "clk12",
-        })(DummyUsb(usb_iobuf, debug=True, product="Hackaday Supercon Badge"))
-        self.add_wb_master(self.usb.debug_bridge.wishbone)
+        })(DummyUsb(usb_iobuf, debug=debug, product="Hackaday Supercon Badge"))
+
+        if debug:
+            self.add_wb_master(self.usb.debug_bridge.wishbone)
+
+            if self.cpu_type is not None:
+                self.register_mem("vexriscv_debug", 0xf00f0000, self.cpu.debug_bus, 0x200)
+                # self.cpu.use_external_variant("rtl/VexRiscv_HaD_Debug.v")
+        elif self.cpu_type is not None:
+            self.cpu.use_external_variant("rtl/VexRiscv_HaD.v")
 
         # Add the 16 MB SPI flash as XIP memory at address 0x03000000
         if not is_sim:
-            flash = SpiFlashDualQuad(platform.request("spiflash4x"), dummy=5)
-            flash.add_clk_primitive(self.platform.device)
-            self.submodules.lxspi = flash
-            self.register_mem("spiflash", 0x03000000, self.lxspi.bus, size=16 * 1024 * 1024)
+            # flash = SpiFlashDualQuad(platform.request("spiflash4x"), dummy=5)
+            # flash.add_clk_primitive(self.platform.device)
+            # self.submodules.lxspi = flash
+            # self.register_mem("spiflash", 0x03000000, self.lxspi.bus, size=16 * 1024 * 1024)
+            self.submodules.picorvspi = flash = PicoRVSpi(self.platform, pads=platform.request("spiflash"), size=16 * 1024 * 1024)
+            self.register_mem("spiflash", 0x03000000, self.picorvspi.bus, size=self.picorvspi.size)
 
-        # Add the 16 MB SPI RAM at address 0x04000000
+        # # Add the 16 MB SPI RAM at address 0x40000000
         ram = SpiRamDualQuad(platform.request("spiram4x", 0), platform.request("spiram4x", 1), dummy=5)
         self.submodules.ram = ram
-        self.register_mem("ram", 0x04000000, self.ram.bus, size=16 * 1024 * 1024)
+        self.register_mem("main_ram", self.mem_map["main_ram"], self.ram.bus, size=16 * 1024 * 1024)
 
         # Let us reboot the device
         self.submodules.reboot = Reboot(platform.request("programn"))
@@ -341,6 +354,12 @@ def main():
     parser.add_argument(
         "--sim", help="generate files for simulation", action="store_true"
     )
+    parser.add_argument(
+        "--no-cpu", help="don't generate a cpu", action="store_true"
+    )
+    parser.add_argument(
+        "--no-debug", help="don't generate the debug bus", action="store_true"
+    )
     args = parser.parse_args()
 
     compile_gateware = True
@@ -358,11 +377,28 @@ def main():
         compile_gateware = False
         compile_software = False
 
-    soc = BaseSoC(platform, is_sim=args.sim)
-    builder = Builder(soc, output_dir="build",
-                            csr_csv="build/csr.csv",
+    cpu_type = "vexriscv"
+    cpu_variant = "linux+debug"
+    if args.no_debug:
+        cpu_variant = "linux"
+
+    if args.no_cpu:
+        cpu_type = None
+        cpu_variant = None
+
+    soc = BaseSoC(platform, is_sim=args.sim, debug=not args.no_debug,
+                            cpu_type=cpu_type, cpu_variant=cpu_variant)
+    builder = Builder(soc, output_dir="build2",
+                            csr_csv="build2/csr.csv",
                             compile_software=compile_software,
                             compile_gateware=compile_gateware)
+    # # If we comile software, pull the code from somewhere other than
+    # # the built-in litex "bios" binary, which makes assumptions about
+    # # what peripherals are available.
+    # if compile_software:
+    #     builder.software_packages = [
+    #         ("bios", os.path.abspath(os.path.join(os.path.dirname(__file__), "rom")))
+    #     ]
     vns = builder.build()
     soc.do_exit(vns)
     lxsocdoc.generate_docs(soc, "build/documentation", project_name="Hack a Day Supercon 2019 Badge", author="Sean \"xobs\" Cross")

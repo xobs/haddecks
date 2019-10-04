@@ -163,6 +163,7 @@ class SpiRamDualQuad(Module, AutoDoc):
             self.comb += bus.dat_r.eq(sr)
         else:
             self.comb += bus.dat_r.eq(reverse_bytes(sr))
+        self.comb += bus.err.eq(0)
 
         # This signal goes HIGH when the DQ outputs of both RAM chips
         # should be ganged together.  This is used for writing addresses
@@ -284,7 +285,7 @@ class SpiRamDualQuad(Module, AutoDoc):
             If(cycle_counter == wbone_width//spi_width//2 + 1,
                 cycle_counter_reset.eq(1),
                 bus.ack.eq(1),
-                cs_n.eq(1),
+                # cs_n.eq(1),
                 NextState("IDLE"),
             ).Else(
                 NextValue(sr, Cat(dq2.i, dq1.i, sr[:-spi_width*2])),
