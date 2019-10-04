@@ -42,8 +42,8 @@ _io = [
     ("clk8", 0, Pins("U18"), IOStandard("LVCMOS33")),
     ("programn", 0, Pins("R1"), IOStandard("LVCMOS33")),
     ("serial", 0,
-        Subsignal("rx", Pins("U2"), IOStandard("LVCMOS33")),
-        Subsignal("tx", Pins("U1"), IOStandard("LVCMOS33"), Misc("PULLMODE=UP")),
+        Subsignal("rx", Pins("U2"), IOStandard("LVCMOS33"), Misc("PULLMODE=UP")),
+        Subsignal("tx", Pins("U1"), IOStandard("LVCMOS33")),
     ),
     ("led", 1, Pins("E3"), IOStandard("LVCMOS33")),
     ("led", 2, Pins("D3"), IOStandard("LVCMOS33")),
@@ -64,14 +64,14 @@ _io = [
         IOStandard("LVCMOS33")
     ),
     ("keypad", 0,
-        Subsignal("left", Pins("G2"), Misc("PULLUP")),
-        Subsignal("right", Pins("F2"), Misc("PULLUP")),
-        Subsignal("up", Pins("F1"), Misc("PULLUP")),
-        Subsignal("down", Pins("C1"), Misc("PULLUP")),
-        Subsignal("start", Pins("E1"), Misc("PULLUP")),
-        Subsignal("select", Pins("D2"), Misc("PULLUP")),
-        Subsignal("a", Pins("D1"), Misc("PULLUP")),
-        Subsignal("b", Pins("E2"), Misc("PULLUP")),
+        Subsignal("left", Pins("G2"), Misc("PULLMODE=UP")),
+        Subsignal("right", Pins("F2"), Misc("PULLMODE=UP")),
+        Subsignal("up", Pins("F1"), Misc("PULLMODE=UP")),
+        Subsignal("down", Pins("C1"), Misc("PULLMODE=UP")),
+        Subsignal("start", Pins("E1"), Misc("PULLMODE=UP")),
+        Subsignal("select", Pins("D2"), Misc("PULLMODE=UP")),
+        Subsignal("a", Pins("D1"), Misc("PULLMODE=UP")),
+        Subsignal("b", Pins("E2"), Misc("PULLMODE=UP")),
     ),
     ("hdmi_out", 0,
         Subsignal("clk_p", Pins("P20"), Inverted(), IOStandard("TMDS_33")),
@@ -84,6 +84,7 @@ _io = [
         Subsignal("data2_n", Pins("L17"), IOStandard("TMDS_33")),
         Subsignal("hpd_notif", Pins("R18"), IOStandard("LVCMOS33"), Inverted()),  # Also called HDMI_HEAC_n (note active low)
         Subsignal("hdmi_heac_p", Pins("T19"), IOStandard("LVCMOS33"), Inverted()),
+        Misc("DRIVE=4"),
     ),
     ("lcd", 0,
         Subsignal("db", Pins("J3 H1 K4 J1 K3 K2 L4 K1 L3 L2 M4 L1 M3 M1 N4 N2 N3 N1"), IOStandard("LVCMOS33")),
@@ -110,12 +111,12 @@ _io = [
     ("spiram4x", 0,
         Subsignal("cs_n", Pins("D20"), IOStandard("LVCMOS33")),
         Subsignal("clk",  Pins("E20"), IOStandard("LVCMOS33")),
-        Subsignal("dq",   Pins("E19 D19 C20 F19"), IOStandard("LVCMOS33")),
+        Subsignal("dq",   Pins("E19 D19 C20 F19"), IOStandard("LVCMOS33"), Misc("PULLMODE=UP")),
     ),
     ("spiram4x", 1,
         Subsignal("cs_n", Pins("F20"), IOStandard("LVCMOS33")),
         Subsignal("clk",  Pins("J19"), IOStandard("LVCMOS33")),
-        Subsignal("dq",   Pins("J20 G19 G20 H20"), IOStandard("LVCMOS33")),
+        Subsignal("dq",   Pins("J20 G19 G20 H20"), IOStandard("LVCMOS33"), Misc("PULLMODE=UP")),
     ),
     ("sao", 0,
         Subsignal("sda", Pins("B2")),
@@ -310,7 +311,7 @@ class BaseSoC(SoCCore, AutoDoc):
 
             if self.cpu_type is not None:
                 self.register_mem("vexriscv_debug", 0xf00f0000, self.cpu.debug_bus, 0x200)
-                # self.cpu.use_external_variant("rtl/VexRiscv_HaD_Debug.v")
+                self.cpu.use_external_variant("rtl/VexRiscv_HaD_Debug.v")
         elif self.cpu_type is not None:
             self.cpu.use_external_variant("rtl/VexRiscv_HaD.v")
 
@@ -323,8 +324,11 @@ class BaseSoC(SoCCore, AutoDoc):
             self.submodules.picorvspi = flash = PicoRVSpi(self.platform, pads=platform.request("spiflash"), size=16 * 1024 * 1024)
             self.register_mem("spiflash", 0x03000000, self.picorvspi.bus, size=self.picorvspi.size)
 
-        # # Add the 16 MB SPI RAM at address 0x40000000
-        ram = SpiRamDualQuad(platform.request("spiram4x", 0), platform.request("spiram4x", 1), dummy=5)
+        # # Add the 16 MB SPI RAM at address 0x40000000 # Value at 40010000: afbfcfef
+        reset_cycles = 2**14-1
+        if is_sim:
+            reset_cycles = 0
+        ram = SpiRamDualQuad(platform.request("spiram4x", 0), platform.request("spiram4x", 1), dummy=5, reset_cycles=reset_cycles)
         self.submodules.ram = ram
         self.register_mem("main_ram", self.mem_map["main_ram"], self.ram.bus, size=16 * 1024 * 1024)
 
@@ -382,7 +386,7 @@ def main():
     if args.no_debug:
         cpu_variant = "linux"
 
-    if args.no_cpu:
+    if args.no_cpu or args.sim:
         cpu_type = None
         cpu_variant = None
 
@@ -401,7 +405,7 @@ def main():
     #     ]
     vns = builder.build()
     soc.do_exit(vns)
-    lxsocdoc.generate_docs(soc, "build/documentation", project_name="Hack a Day Supercon 2019 Badge", author="Sean \"xobs\" Cross")
+    lxsocdoc.generate_docs(soc, builder.output_dir + "/documentation", project_name="Hack a Day Supercon 2019 Badge", author="Sean \"xobs\" Cross")
 
 if __name__ == "__main__":
     main()
