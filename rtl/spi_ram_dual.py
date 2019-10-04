@@ -151,6 +151,7 @@ class SpiRamDualQuad(Module, AutoDoc):
             1: _format_cmd(_WRITE, 1),
         }
         write_cmd = write_cmd_params[spi_width]
+        qpi_cmd_width = 2
         addr_width = 24
 
         dq1 = TSTriple(spi_width)
@@ -172,25 +173,24 @@ class SpiRamDualQuad(Module, AutoDoc):
 
         self.comb += [
             pads_1.clk.eq(clk),
-            pads_1.cs_n.eq(cs_n),
             pads_2.clk.eq(clk),
+            pads_1.cs_n.eq(cs_n),
             pads_2.cs_n.eq(cs_n),
+            dq1.oe.eq(dq_oe),
+            dq2.oe.eq(dq_oe),
             dq1.o.eq(sr[-spi_width:]),
             If(gang_outputs,
                 dq2.o.eq(sr[-spi_width:]),
             ).Else(
                 dq2.o.eq(sr[-(spi_width*2):-spi_width]),
             ),
-            dq1.oe.eq(dq_oe),
-            dq2.oe.eq(dq_oe),
         ]
 
         self.submodules.fsm = fsm = FSM()
         cycle_counter = Signal(5, reset_less=True)
         cycle_counter_reset = Signal()
         cycle_counter_ce = Signal()
-        is_write = Signal()
-        next_addr = Signal(22)
+        # next_addr = Signal(22)
         self.sync += \
             If(cycle_counter_reset,
                 cycle_counter.eq(0)
@@ -198,6 +198,34 @@ class SpiRamDualQuad(Module, AutoDoc):
                 cycle_counter.eq(cycle_counter + 1)
             )
 
+        fsm.act("INIT_0",
+            cycle_counter_reset.eq(1),
+            cs_n.eq(1),
+            clk.eq(0),
+            dq_oe.eq(0),
+            NextValue(sr, 0xF5000000), # Enable QPI mode
+            #_format_cmd(0x35, 4)), # Disable QPI mode
+            NextState("INIT_1"),
+        )
+        fsm.act("INIT_1",
+            cycle_counter_ce.eq(1),
+            dq_oe.eq(1),
+            cs_n.eq(0),
+            clk.eq(ClockSignal()),
+            gang_outputs.eq(1),
+
+            # NextValue(sr, Cat(Signal(cmd_width - wbone_width + spi_width), sr)),
+            # If(cycle_counter == cmd_width//spi_width - 1,
+            NextValue(sr, Cat(Signal(spi_width), sr)),
+            If(cycle_counter == 8//spi_width - 1,
+                cycle_counter_reset.eq(1),
+                NextState("IDLE"),
+            ),
+        )
+
+        cmd_width = 2*4
+        read_cmd = _QIOFR
+        write_cmd = _QIOW
         fsm.act("IDLE",
             cycle_counter_reset.eq(1),
             cs_n.eq(1),
@@ -205,9 +233,11 @@ class SpiRamDualQuad(Module, AutoDoc):
             If(bus.cyc & bus.stb,
                 NextState("SEND_CMD"),
                 If(bus.we,
-                    NextValue(sr, write_cmd),
+                    NextValue(sr, Cat(Signal(24), write_cmd)),
+                    # NextValue(sr, write_cmd),
                 ).Else(
-                    NextValue(sr, read_cmd),
+                    NextValue(sr, Cat(Signal(24), read_cmd)),
+                    # NextValue(sr, read_cmd),
                 ),
             )
         )
@@ -219,10 +249,7 @@ class SpiRamDualQuad(Module, AutoDoc):
             clk.eq(ClockSignal()),
             gang_outputs.eq(1),
 
-            # Cache the write value so we can speed up sequences
-            NextValue(is_write, bus.we),
-
-            NextValue(sr, Cat(Signal(cmd_width - wbone_width + spi_width), sr)),
+            NextValue(sr, Cat(Signal(spi_width), sr)),
             If(cycle_counter == cmd_width//spi_width - 1,
                 cycle_counter_reset.eq(1),
                 # Wishbone addresses are 32-bits.  Litex Wishbone addresses are 30 bits.
@@ -234,7 +261,7 @@ class SpiRamDualQuad(Module, AutoDoc):
                 NextValue(sr, bus.adr << 9),
                 # Litex Wishbone addresses are missing the bottom two bits,
                 # so the next address to read is just bus.adr + 1.
-                NextValue(next_addr, bus.adr + 1),
+                # NextValue(next_addr, bus.adr + 1),
                 NextState("SEND_ADDR"),
             ),
         )
@@ -244,10 +271,10 @@ class SpiRamDualQuad(Module, AutoDoc):
             cs_n.eq(0),
             clk.eq(ClockSignal()),
             gang_outputs.eq(1),
-            NextValue(sr, Cat(Signal(cmd_width - wbone_width + spi_width), sr)),
+            NextValue(sr, Cat(Signal(spi_width), sr)),
             If(cycle_counter == addr_width//spi_width - 1,
                 cycle_counter_reset.eq(1),
-                If(is_write,
+                If(bus.we,
                     NextState("SEND_DATA"),
                     NextValue(sr, bus.dat_w),
                 ).Else(
@@ -260,7 +287,7 @@ class SpiRamDualQuad(Module, AutoDoc):
             dq_oe.eq(1),
             cs_n.eq(0),
             clk.eq(ClockSignal()),
-            NextValue(sr, Cat(Signal(cmd_width - wbone_width + (spi_width * 2)), sr)),
+            NextValue(sr, Cat(Signal(spi_width * 2), sr)),
             If(cycle_counter == wbone_width//spi_width//2 - 1,
                 cycle_counter_reset.eq(1),
                 NextState("IDLE"),
@@ -285,9 +312,9 @@ class SpiRamDualQuad(Module, AutoDoc):
             If(cycle_counter == wbone_width//spi_width//2 + 1,
                 cycle_counter_reset.eq(1),
                 bus.ack.eq(1),
-                # cs_n.eq(1),
+                cs_n.eq(1),
                 NextState("IDLE"),
-            ).Else(
+            ).Else( # dq1.i is broken ?!
                 NextValue(sr, Cat(dq2.i, dq1.i, sr[:-spi_width*2])),
             ),
         )
