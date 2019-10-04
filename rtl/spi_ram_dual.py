@@ -41,7 +41,7 @@ def _format_cmd(cmd, spi_width):
 
 
 class SpiRamDualQuad(Module, AutoDoc):
-    def __init__(self, pads_1, pads_2, dummy=5, endianness="big"):
+    def __init__(self, pads_1, pads_2, dummy=5, endianness="big", reset_cycles=2**14-1, quad=False):
         """
         Dual-chip SPI RAM
         """
@@ -187,10 +187,15 @@ class SpiRamDualQuad(Module, AutoDoc):
         ]
 
         self.submodules.fsm = fsm = FSM()
+
+        startup_delay = Signal(14, reset=reset_cycles) # Must hold in reset for 150 us
+        startup_delay_ce = Signal()
+        self.sync += If(startup_delay_ce, startup_delay.eq(startup_delay - 1))
+
         cycle_counter = Signal(5, reset_less=True)
         cycle_counter_reset = Signal()
         cycle_counter_ce = Signal()
-        # next_addr = Signal(22)
+
         self.sync += \
             If(cycle_counter_reset,
                 cycle_counter.eq(0)
@@ -202,10 +207,13 @@ class SpiRamDualQuad(Module, AutoDoc):
             cycle_counter_reset.eq(1),
             cs_n.eq(1),
             clk.eq(0),
-            dq_oe.eq(0),
-            NextValue(sr, 0xF5000000), # Enable QPI mode
-            #_format_cmd(0x35, 4)), # Disable QPI mode
-            NextState("INIT_1"),
+            dq_oe.eq(1),
+            startup_delay_ce.eq(1),
+            If(startup_delay == 0,
+                cycle_counter_reset.eq(1),
+                NextValue(sr, _format_cmd(0x66, 4)), # Enable Reset
+                NextState("INIT_1"),
+            ),
         )
         fsm.act("INIT_1",
             cycle_counter_ce.eq(1),
@@ -214,18 +222,88 @@ class SpiRamDualQuad(Module, AutoDoc):
             clk.eq(ClockSignal()),
             gang_outputs.eq(1),
 
-            # NextValue(sr, Cat(Signal(cmd_width - wbone_width + spi_width), sr)),
-            # If(cycle_counter == cmd_width//spi_width - 1,
-            NextValue(sr, Cat(Signal(spi_width), sr)),
-            If(cycle_counter == 8//spi_width - 1,
+            NextValue(sr, Cat(Signal(cmd_width - wbone_width + spi_width), sr)),
+            If(cycle_counter == cmd_width//spi_width - 1,
                 cycle_counter_reset.eq(1),
-                NextState("IDLE"),
+                cs_n.eq(1),
+                NextState("INIT_2"),
             ),
         )
 
-        cmd_width = 2*4
-        read_cmd = _QIOFR
-        write_cmd = _QIOW
+        fsm.act("INIT_2",
+            cs_n.eq(1),
+            cycle_counter_reset.eq(1),
+            NextValue(sr, _format_cmd(0x99, 4)), # Reset
+            NextState("INIT_3"),
+        )
+        fsm.act("INIT_3",
+            cycle_counter_ce.eq(1),
+            dq_oe.eq(1),
+            cs_n.eq(0),
+            clk.eq(ClockSignal()),
+            gang_outputs.eq(1),
+
+            NextValue(sr, Cat(Signal(cmd_width - wbone_width + spi_width), sr)),
+            If(cycle_counter == cmd_width//spi_width - 1,
+                cycle_counter_reset.eq(1),
+                cs_n.eq(1),
+                NextState("INIT_4"),
+            ),
+        )
+
+        if quad:
+            fsm.act("INIT_4",
+                cs_n.eq(1),
+                cycle_counter_reset.eq(1),
+                NextValue(sr, _format_cmd(0x35, 4)), # Enable QPI mode
+                # NextValue(sr, 0xF5000000), # Disable QPI mode
+                NextState("INIT_5"),
+            )
+            fsm.act("INIT_5",
+                cycle_counter_ce.eq(1),
+                dq_oe.eq(1),
+                cs_n.eq(0),
+                clk.eq(ClockSignal()),
+                gang_outputs.eq(1),
+
+                NextValue(sr, Cat(Signal(cmd_width - wbone_width + spi_width), sr)),
+                If(cycle_counter == cmd_width//spi_width - 1,
+                # NextValue(sr, Cat(Signal(spi_width), sr)),
+                # If(cycle_counter == 8//spi_width - 1,
+                    cycle_counter_reset.eq(1),
+                    cs_n.eq(1),
+                    NextState("IDLE"),
+                ),
+            )
+            cmd_width = 2*4
+            read_cmd = _QIOFR
+            write_cmd = _QIOW
+
+        else:
+            fsm.act("INIT_4",
+                cs_n.eq(1),
+                cycle_counter_reset.eq(1),
+                NextValue(sr, 0xF5000000), # Disable QPI mode
+                NextState("INIT_5"),
+            )
+            fsm.act("INIT_5",
+                cycle_counter_ce.eq(1),
+                dq_oe.eq(1),
+                cs_n.eq(0),
+                clk.eq(ClockSignal()),
+                gang_outputs.eq(1),
+
+                NextValue(sr, Cat(Signal(spi_width), sr)),
+                If(cycle_counter == 8//spi_width - 1,
+                    cycle_counter_reset.eq(1),
+                    cs_n.eq(1),
+                    NextState("IDLE"),
+                ),
+            )
+
+        if quad:
+            write_cmd = Cat(Signal(24), write_cmd)
+            read_cmd = Cat(Signal(24), read_cmd)
         fsm.act("IDLE",
             cycle_counter_reset.eq(1),
             cs_n.eq(1),
@@ -233,11 +311,11 @@ class SpiRamDualQuad(Module, AutoDoc):
             If(bus.cyc & bus.stb,
                 NextState("SEND_CMD"),
                 If(bus.we,
-                    NextValue(sr, Cat(Signal(24), write_cmd)),
-                    # NextValue(sr, write_cmd),
+                    # NextValue(sr, Cat(Signal(24), write_cmd)),
+                    NextValue(sr, write_cmd),
                 ).Else(
-                    NextValue(sr, Cat(Signal(24), read_cmd)),
-                    # NextValue(sr, read_cmd),
+                    # NextValue(sr, Cat(Signal(24), read_cmd)),
+                    NextValue(sr, read_cmd),
                 ),
             )
         )
