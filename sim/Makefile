@@ -43,7 +43,7 @@ endif
 
 PYTHON ?= python3
 
-VERILOG_SOURCES = $(WPWD)/dut.v $(WPWD)/tb.v $(WPWD)/spiram.v
+VERILOG_SOURCES = $(WPWD)/dut.v $(WPWD)/tb.v $(WPWD)/ly68l6400_model.v
 TOPLEVEL = tb
 MODULE = test-haddecks
 
@@ -54,5 +54,5 @@ include $(shell cocotb-config --makefiles)/Makefile.sim
 
 $(PWD)/dut.v: ../haddecks.py
 	(cd ..; $(PYTHON) haddecks.py --sim --lx-ignore-deps)
-	mv ../build/gateware/dut.v dut.v
-	mv ../build/gateware/*.init .
+	mv ../build2/gateware/dut.v dut.v
+	mv ../build2/gateware/*.init .

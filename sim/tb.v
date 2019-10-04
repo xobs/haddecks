@@ -49,23 +49,38 @@ dut dut (
 	.wishbone_err(wishbone_err)
 );
 
-spiram ramchip1 (
-	.csn(spiram4x0_cs_n),
-	.clk(spiram4x0_clk),
-	.io0(spiram4x0_dq[0]), // MOSI
-	.io1(spiram4x0_dq[1]), // MISO
-	.io2(spiram4x0_dq[2]),
-	.io3(spiram4x0_dq[3])
-);
+	// Add ram chip 1.
+	// Note that we don't feed clk into it, because iverilog
+	// doesn't work correctly.
+	wire [3:0] ramchip1_i;
+	wire [3:0] ramchip1_o;
+	wire ramchip1_oe;
+	assign ramchip1_i = ramchip1_oe ? 4'bz : spiram4x0_dq;
+	assign spiram4x0_dq = ramchip1_oe ? ramchip1_o : 4'bz;
+	spiram ramchip1 (
+		.spi_ncs(spiram4x0_cs_n),
+		// .spi_clk(spiram4x0_clk),
+		.spi_clk(clk48),
+		.spi_sin(ramchip1_i),
+		.spi_sout(ramchip1_o),
+		.spi_oe(ramchip1_oe)
+	);
 
-spiram ramchip2 (
-	.csn(spiram4x1_cs_n),
-	.clk(spiram4x1_clk),
-	.io0(spiram4x1_dq[0]), // MOSI
-	.io1(spiram4x1_dq[1]), // MISO
-	.io2(spiram4x1_dq[2]),
-	.io3(spiram4x1_dq[3])
-);
+
+	wire [3:0] ramchip2_i;
+	wire [3:0] ramchip2_o;
+	wire ramchip2_oe;
+	assign ramchip2_i = ramchip2_oe ? 4'bz : spiram4x1_dq;
+	assign spiram4x1_dq = ramchip2_oe ? ramchip2_o : 4'bz;
+
+	spiram ramchip2 (
+		.spi_ncs(spiram4x1_cs_n),
+		// .spi_clk(spiram4x1_clk),
+		.spi_clk(clk48),
+		.spi_sin(ramchip2_i),
+		.spi_sout(ramchip2_o),
+		.spi_oe(ramchip2_oe)
+	);
 
   // Dump waves
   initial begin
