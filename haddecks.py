@@ -281,6 +281,20 @@ class BaseSoC(SoCCore, AutoDoc):
         "messible":       16,
     }
 
+    # We must define memory offsets here rather than using the litex
+    # defaults.  This is because the mmu only allows for certain
+    # regions to be unbuffered:
+    # https://github.com/m-labs/VexRiscv-verilog/blob/master/src/main/scala/vexriscv/GenCoreDefault.scala#L139-L143
+    SoCCore.mem_map = {
+        "rom":          0x00000000,
+        "sram":         0x10000000,
+        "emulator_ram": 0x20000000,
+        "ethmac":       0x30000000,
+        "spiflash":     0x50000000,
+        "main_ram":     0xc0000000,
+        "csr":          0xe0000000,
+    }
+
     def __init__(self, platform, is_sim=False, debug=True, **kwargs):
         clk_freq = int(48e6)
         SoCCore.__init__(self, platform, clk_freq,
@@ -322,7 +336,7 @@ class BaseSoC(SoCCore, AutoDoc):
             # self.submodules.lxspi = flash
             # self.register_mem("spiflash", 0x03000000, self.lxspi.bus, size=16 * 1024 * 1024)
             self.submodules.picorvspi = flash = PicoRVSpi(self.platform, pads=platform.request("spiflash"), size=16 * 1024 * 1024)
-            self.register_mem("spiflash", 0x03000000, self.picorvspi.bus, size=self.picorvspi.size)
+            self.register_mem("spiflash", self.mem_map["spiflash"], self.picorvspi.bus, size=self.picorvspi.size)
 
         # # Add the 16 MB SPI RAM at address 0x40000000 # Value at 40010000: afbfcfef
         reset_cycles = 2**14-1
@@ -348,7 +362,6 @@ class BaseSoC(SoCCore, AutoDoc):
 
         if is_sim:
             self.add_wb_master(self.platform.request("wishbone"))
-
 
 def main():
     parser = argparse.ArgumentParser(description="Build the Hack a Day Supercon 2019 Badge firmware")
