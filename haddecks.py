@@ -18,7 +18,7 @@ from migen import *
 from litex.build.lattice import LatticePlatform
 from litex.build.sim.platform import SimPlatform
 from litex.build.generic_platform import Pins, IOStandard, Subsignal, Inverted, Misc
-from litex.soc.integration import SoCCore
+from litex.soc.integration.soc_core import SoCCore
 from litex.soc.integration.builder import Builder
 from litex.soc.integration.doc import AutoDoc, ModuleDoc
 
