@@ -405,8 +405,8 @@ def main():
 
     soc = BaseSoC(platform, is_sim=args.sim, debug=not args.no_debug,
                             cpu_type=cpu_type, cpu_variant=cpu_variant)
-    builder = Builder(soc, output_dir="build2",
-                            csr_csv="build2/csr.csv",
+    builder = Builder(soc, output_dir="build",
+                            csr_csv="build/csr.csv",
                             compile_software=compile_software,
                             compile_gateware=compile_gateware)
     # # If we comile software, pull the code from somewhere other than
