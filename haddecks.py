@@ -21,6 +21,7 @@ from litex.build.generic_platform import Pins, IOStandard, Subsignal, Inverted, 
 from litex.soc.integration.soc_core import SoCCore
 from litex.soc.integration.builder import Builder
 from litex.soc.integration.doc import AutoDoc, ModuleDoc
+from litex.soc.interconnect.csr import *
 
 from litex.soc.cores.spi_flash import SpiFlashDualQuad
 
@@ -163,6 +164,29 @@ _connectors = [
     ("pmodb", "B15 C15 A13 B13"),
     ("genio", "C5 B5 A5 C6 B6 A6 D6 C7 A7 C8 B8 A8 D9 C9 B9 A9 D10 C10 B10 A10 D11 C11 B11 A11 G18 H17 B12 A12 E17 C14"),
 ]
+
+class ShittyAddOn(Module, AutoCSR):
+    def __init__(self, platform, pad, use_all_gpio=False):
+        gpio_count=len(pad)
+        if not use_all_gpio:
+            # subtract two i2c pins
+            gpio_count=gpio_count-2
+        if gpio_count != 0:
+            self._pins_in = CSRStatus(gpio_count)
+            self._pins_out = CSRStorage(gpio_count)
+            self._pins_oe = CSRStorage(gpio_count)
+
+            # we have to do this because vectored TSTriples are generated with a common tristate signal
+            gpio_pins_t = [None] * len(pad)
+            bit=gpio_count-1
+            for pin_group in pad.layout:
+                for pin in getattr(pad, pin_group[0]):
+                    gpio_pins_t[bit] = TSTriple()
+                    self.specials += gpio_pins_t[bit].get_tristate(pin)
+                    self.comb += gpio_pins_t[bit].o.eq(self._pins_out.storage[bit])
+                    self.comb += gpio_pins_t[bit].oe.eq(self._pins_oe.storage[bit])
+                    self.comb += self._pins_in.status[bit].eq(gpio_pins_t[bit].i)
+                    bit=bit-1
 
 class CocotbPlatform(SimPlatform):
     def __init__(self, toolchain="verilator"):
@@ -362,6 +386,12 @@ class BaseSoC(SoCCore, AutoDoc):
 
         if is_sim:
             self.add_wb_master(self.platform.request("wishbone"))
+
+        # SAO and PMOD
+        self.submodules.sao0 = ShittyAddOn(self.platform, self.platform.request("sao", 0),  use_all_gpio=True);
+        self.add_csr("sao0")
+        self.submodules.sao1 = ShittyAddOn(self.platform, self.platform.request("sao", 1),  use_all_gpio=True);
+        self.add_csr("sao1")
 
 def main():
     parser = argparse.ArgumentParser(description="Build the Hack a Day Supercon 2019 Badge firmware")
