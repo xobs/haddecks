@@ -24,6 +24,7 @@ from litex.soc.integration.doc import AutoDoc, ModuleDoc
 from litex.soc.interconnect.csr import *
 
 from litex.soc.cores.bitbang import I2CMaster
+from litex.soc.cores import gpio
 from litex.soc.cores.spi_flash import SpiFlashDualQuad
 
 from valentyusb.usbcore.cpu.dummyusb import DummyUsb
@@ -47,17 +48,8 @@ _io = [
         Subsignal("rx", Pins("U2"), IOStandard("LVCMOS33"), Misc("PULLMODE=UP")),
         Subsignal("tx", Pins("U1"), IOStandard("LVCMOS33")),
     ),
-    ("led", 1, Pins("E3"), IOStandard("LVCMOS33")),
-    ("led", 2, Pins("D3"), IOStandard("LVCMOS33")),
-    ("led", 3, Pins("C3"), IOStandard("LVCMOS33")),
-    ("led", 4, Pins("C4"), IOStandard("LVCMOS33")),
-    ("led", 5, Pins("C2"), IOStandard("LVCMOS33")),
-    ("led", 6, Pins("B1"), IOStandard("LVCMOS33")),
-    ("led", 7, Pins("B20"), IOStandard("LVCMOS33")),
-    ("led", 8, Pins("B19"), IOStandard("LVCMOS33")),
-    ("led", 9, Pins("A18"), IOStandard("LVCMOS33")),
-    ("led", 10, Pins("K20"), IOStandard("LVCMOS33")),
-    ("led", 11, Pins("K19"), IOStandard("LVCMOS33")),
+    ("led", 0, Pins("E3 D3 C3 C4 C2 B1 B20 B19 A18 K20 K19"), IOStandard("LVCMOS33")),  # Anodes
+    ("led", 1, Pins("P19 L18 K18"), IOStandard("LVCMOS33")), # Cathodes via FET
     ("usb", 0,
         Subsignal("d_p", Pins("F3")),
         Subsignal("d_n", Pins("G3")),
@@ -84,7 +76,7 @@ _io = [
         Subsignal("data1_n", Pins("M20"), IOStandard("TMDS_33")),
         Subsignal("data2_p", Pins("L16"), IOStandard("TMDS_33")),
         Subsignal("data2_n", Pins("L17"), IOStandard("TMDS_33")),
-        Subsignal("hpd_notif", Pins("R18"), IOStandard("LVCMOS33"), Inverted()),  # Also called HDMI_HEAC_n (note active low)
+        Subsignal("hpd_notif", Pins("R18"), IOStandard("LVCMOS33"), Inverted()),  # Also called HDMI_HEAC_n
         Subsignal("hdmi_heac_p", Pins("T19"), IOStandard("LVCMOS33"), Inverted()),
         Misc("DRIVE=4"),
     ),
@@ -161,24 +153,71 @@ _io = [
 ]
 
 _connectors = [
-    ("pmoda", "A15 C16 A14 D16"),
-    ("pmodb", "B15 C15 A13 B13"),
+    ("pmod", "A15 C16 A14 D16 B15 C15 A13 B13"),
     ("genio", "C5 B5 A5 C6 B6 A6 D6 C7 A7 C8 B8 A8 D9 C9 B9 A9 D10 C10 B10 A10 D11 C11 B11 A11 G18 H17 B12 A12 E17 C14"),
 ]
 
-class ShittyAddOn(Module, AutoCSR):
-    def __init__(self, platform, pads, use_all_gpio=False):
+_pmod_gpio = [
+    ("pmod_gpio", 0,
+     Subsignal("p0", Pins("pmod:0")),
+     Subsignal("p1", Pins("pmod:1")),
+     Subsignal("p2", Pins("pmod:2")),
+     Subsignal("p3", Pins("pmod:3")),
+     Subsignal("p4", Pins("pmod:4")),
+     Subsignal("p5", Pins("pmod:5")),
+     Subsignal("p6", Pins("pmod:6")),
+     Subsignal("p7", Pins("pmod:7")),
+     IOStandard("LVCMOS33")
+    ),
+]
+
+_genio_gpio = [
+    ("genio_gpio", 0,
+     Subsignal("p0", Pins("genio:0")),
+     Subsignal("p1", Pins("genio:1")),
+     Subsignal("p2", Pins("genio:2")),
+     Subsignal("p3", Pins("genio:3")),
+     Subsignal("p4", Pins("genio:4")),
+     Subsignal("p5", Pins("genio:5")),
+     Subsignal("p6", Pins("genio:6")),
+     Subsignal("p7", Pins("genio:7")),
+     Subsignal("p8", Pins("genio:8")),
+     Subsignal("p9", Pins("genio:9")),
+
+     Subsignal("p10", Pins("genio:10")),
+     Subsignal("p11", Pins("genio:11")),
+     Subsignal("p12", Pins("genio:12")),
+     Subsignal("p13", Pins("genio:13")),
+     Subsignal("p14", Pins("genio:14")),
+     Subsignal("p15", Pins("genio:15")),
+     Subsignal("p16", Pins("genio:16")),
+     Subsignal("p17", Pins("genio:17")),
+     Subsignal("p18", Pins("genio:18")),
+     Subsignal("p19", Pins("genio:19")),
+
+     Subsignal("p20", Pins("genio:20")),
+     Subsignal("p21", Pins("genio:21")),
+     Subsignal("p22", Pins("genio:22")),
+     Subsignal("p23", Pins("genio:23")),
+     Subsignal("p24", Pins("genio:24")),
+     Subsignal("p25", Pins("genio:25")),
+     Subsignal("p26", Pins("genio:26")),
+     Subsignal("p27", Pins("genio:27")),
+     Subsignal("p28", Pins("genio:28")),
+     Subsignal("p29", Pins("genio:29")),
+    )
+]
+
+class GPIOBidirectional(Module, AutoCSR):
+    def __init__(self, pads, disable_i2c=False):
         pad_count = len(pads)
-        if not use_all_gpio:
-            self.i2c_master = I2CMaster(pads)
         self._pins_in = CSRStatus(pad_count)
         self._pins_out = CSRStorage(pad_count)
         self._pins_oe = CSRStorage(pad_count)
-
         gpio_pins_t = [None] * pad_count
-        bit=0
+        bit = 0
         for pin_group in pads.layout:
-            if use_all_gpio or (pin_group[0] != "scl" and pin_group[0] != "sda") :
+            if disable_i2c or (pin_group[0] != "scl" and pin_group[0] != "sda") :
                 for pin in getattr(pads, pin_group[0]):
                     gpio_pins_t[bit] = TSTriple()
                     self.specials += gpio_pins_t[bit].get_tristate(pin)
@@ -190,10 +229,18 @@ class ShittyAddOn(Module, AutoCSR):
                 # skip i2c pins
                 bit=bit+1
 
+class ShittyAddOn(Module, AutoCSR):
+    def __init__(self, platform, pads, disable_i2c=False):
+        pad_count = len(pads)
+        if not disable_i2c:
+            self.i2c_master = I2CMaster(pads)
+        self.gpio = GPIOBidirectional(pads, disable_i2c)
+
     def get_fragment(self):
         fragment = super().get_fragment()
         if getattr(self, "i2c_master", None):
             fragment += self.i2c_master.get_fragment()
+        fragment += self.gpio.get_fragment()
         return fragment
 
 class CocotbPlatform(SimPlatform):
@@ -395,11 +442,27 @@ class BaseSoC(SoCCore, AutoDoc):
         if is_sim:
             self.add_wb_master(self.platform.request("wishbone"))
 
-        # SAO and PMOD
-        self.submodules.sao0 = ShittyAddOn(self.platform, self.platform.request("sao", 0),  use_all_gpio=True);
+        # SAO
+        self.submodules.sao0 = ShittyAddOn(self.platform, self.platform.request("sao", 0),  disable_i2c=kwargs["sao0_disable_i2c"]);
         self.add_csr("sao0")
-        self.submodules.sao1 = ShittyAddOn(self.platform, self.platform.request("sao", 1));
+        self.submodules.sao1 = ShittyAddOn(self.platform, self.platform.request("sao", 1),  disable_i2c=kwargs["sao1_disable_i2c"]);
         self.add_csr("sao1")
+        # PMOD
+        platform.add_extension(_pmod_gpio)
+        self.submodules.pmod = GPIOBidirectional(self.platform.request("pmod_gpio"))
+        self.add_csr("pmod")
+        # GENIO
+        platform.add_extension(_genio_gpio)
+        self.submodules.genio = GPIOBidirectional(self.platform.request("genio_gpio"))
+        self.add_csr("genio")
+        # LEDs
+        self.submodules.led0 = gpio.GPIOOut(self.platform.request("led", 0))
+        self.add_csr("led0")
+        self.submodules.led0 = gpio.GPIOOut(self.platform.request("led", 1))
+        self.add_csr("led1")
+        # Keypad
+        self.submodules.keypad = gpio.GPIOIn(Cat(self.platform.request("keypad", 0).flatten()))
+        self.add_csr("keypad")
 
 def main():
     parser = argparse.ArgumentParser(description="Build the Hack a Day Supercon 2019 Badge firmware")
@@ -414,6 +477,12 @@ def main():
     )
     parser.add_argument(
         "--no-debug", help="don't generate the debug bus", action="store_true"
+    )
+    parser.add_argument(
+        "--sao0-disable-i2c", help="Disable i2c on sao0", action="store_true"
+    )
+    parser.add_argument(
+        "--sao1-disable-i2c", help="Disable i2c on sao1", action="store_true"
     )
     args = parser.parse_args()
 
@@ -442,7 +511,10 @@ def main():
         cpu_variant = None
 
     soc = BaseSoC(platform, is_sim=args.sim, debug=not args.no_debug,
-                            cpu_type=cpu_type, cpu_variant=cpu_variant)
+                            cpu_type=cpu_type, cpu_variant=cpu_variant,
+                            sao0_disable_i2c=args.sao0_disable_i2c,
+                            sao1_disable_i2c=args.sao1_disable_i2c,
+    )
     builder = Builder(soc, output_dir="build",
                             csr_csv="build/csr.csv",
                             compile_software=compile_software,
