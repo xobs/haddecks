@@ -458,7 +458,7 @@ class BaseSoC(SoCCore, AutoDoc):
         # LEDs
         self.submodules.led0 = gpio.GPIOOut(self.platform.request("led", 0))
         self.add_csr("led0")
-        self.submodules.led0 = gpio.GPIOOut(self.platform.request("led", 1))
+        self.submodules.led1 = gpio.GPIOOut(self.platform.request("led", 1))
         self.add_csr("led1")
         # Keypad
         self.submodules.keypad = gpio.GPIOIn(Cat(self.platform.request("keypad", 0).flatten()))
