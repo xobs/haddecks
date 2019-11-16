@@ -296,7 +296,11 @@ class SpiRamDualQuad(Module, AutoDoc):
         fsm.act("IDLE",
             cycle_counter_reset.eq(1),
             cs_n.eq(1),
+            dq_oe.eq(1),
+            NextValue(sr, Replicate(1, 32)),
+            gang_outputs.eq(1),
             clk.eq(0),
+
             If(bus.cyc & bus.stb,
                 NextState("SEND_CMD"),
                 If(bus.we,
