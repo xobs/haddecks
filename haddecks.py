@@ -421,7 +421,7 @@ class BaseSoC(SoCCore, AutoDoc):
         reset_cycles = 2**14-1
         if is_sim:
             reset_cycles = 0
-        ram = SpiRamDualQuad(platform.request("spiram4x", 0), platform.request("spiram4x", 1), dummy=5, reset_cycles=reset_cycles, qpi=False)
+        ram = SpiRamDualQuad(platform.request("spiram4x", 0), platform.request("spiram4x", 1), dummy=5, reset_cycles=reset_cycles, qpi=True)
         self.submodules.ram = ram
         self.register_mem("main_ram", self.mem_map["main_ram"], self.ram.bus, size=16 * 1024 * 1024)
 
