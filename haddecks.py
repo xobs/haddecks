@@ -501,9 +501,9 @@ def main():
         compile_software = False
 
     cpu_type = "vexriscv"
-    cpu_variant = "linux+debug"
+    cpu_variant = "min+debug"
     if args.no_debug:
-        cpu_variant = "linux"
+        cpu_variant = "min"
 
     if args.no_cpu or args.sim:
         cpu_type = None
