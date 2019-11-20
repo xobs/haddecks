@@ -397,7 +397,7 @@ class BaseSoC(SoCCore, AutoDoc):
         self.submodules.usb = ClockDomainsRenamer({
             "usb_48": "clk48",
             "usb_12": "clk12",
-        })(DummyUsb(usb_iobuf, debug=debug, product="Hackaday Supercon Badge"))
+        })(DummyUsb(usb_iobuf, debug=debug, product="Hackaday Supercon Badge", cdc=True))
 
         if debug:
             self.add_wb_master(self.usb.debug_bridge.wishbone)
