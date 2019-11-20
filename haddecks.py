@@ -379,7 +379,6 @@ class BaseSoC(SoCCore, AutoDoc):
         SoCCore.__init__(self, platform, clk_freq,
                          integrated_rom_size=16384,
                          integrated_sram_size=65536,
-                         wishbone_timeout_cycles=1e9,
                          **kwargs)
         if is_sim:
             self.submodules.crg = CocotbPlatform._CRG(self.platform)
