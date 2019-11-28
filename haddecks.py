@@ -28,6 +28,7 @@ from litex.soc.cores import gpio
 from litex.soc.cores.spi_flash import SpiFlashDualQuad
 
 from valentyusb.usbcore.cpu.dummyusb import DummyUsb
+from valentyusb.usbcore.cpu.eptri import TriEndpointInterface
 from valentyusb.usbcore import io as usbio
 
 from rtl.crg import _CRG
@@ -350,9 +351,9 @@ class BaseSoC(SoCCore, AutoDoc):
         "uart":           3,  # provided by default (optional)
         "identifier_mem": 4,  # provided by default (optional)
         "timer0":         5,  # provided by default (optional)
-        "picorvspi":      7,
         "lcdif":          8,
         "usb":            9,
+        "picorvspi":      10,
         "reboot":         12,
         "rgb":            13,
         "version":        14,
@@ -367,23 +368,29 @@ class BaseSoC(SoCCore, AutoDoc):
     SoCCore.mem_map = {
         "rom":          0x00000000,
         "sram":         0x10000000,
-        "emulator_ram": 0x20000000,
+        "spiflash":     0x20000000,
         "ethmac":       0x30000000,
-        "spiflash":     0x50000000,
-        "main_ram":     0xc0000000,
+        "main_ram":     0x40000000,
+        "emulator_ram": 0x50000000,
         "csr":          0xe0000000,
     }
 
+    interrupt_map = {
+        "timer0": 2,
+        "usb": 3,
+    }
+    interrupt_map.update(SoCCore.interrupt_map)
     def __init__(self, platform, is_sim=False, debug=True, **kwargs):
-        clk_freq = int(48e6)
+        clk_freq = int(12e6)
         SoCCore.__init__(self, platform, clk_freq,
                          integrated_rom_size=16384,
-                         integrated_sram_size=65536,
+                         integrated_sram_size=131072,
+                         with_uart=True, uart_stub=True,
                          **kwargs)
         if is_sim:
             self.submodules.crg = CocotbPlatform._CRG(self.platform)
         else:
-            self.submodules.crg = _CRG(self.platform)
+            self.submodules.crg = _CRG(self.platform, fast_sysclk=False)
 
         # Add a "Version" module so we can see what version of the board this is.
         self.submodules.version = Version("proto2", [
@@ -396,9 +403,13 @@ class BaseSoC(SoCCore, AutoDoc):
         self.submodules.usb = ClockDomainsRenamer({
             "usb_48": "clk48",
             "usb_12": "clk12",
-        })(DummyUsb(usb_iobuf, debug=debug, product="Hackaday Supercon Badge", cdc=True))
+        # })(DummyUsb(usb_iobuf, debug=debug, product="Hackaday Supercon Badge", cdc=True))
+        })(TriEndpointInterface(usb_iobuf, debug=debug))
 
         if debug:
+            from litex.soc.cores.uart import UARTWishboneBridge
+            self.submodules.uart_bridge = UARTWishboneBridge(platform.request("serial"), clk_freq, baudrate=115200)
+            self.add_wb_master(self.uart_bridge.wishbone)
             self.add_wb_master(self.usb.debug_bridge.wishbone)
 
             if self.cpu_type is not None:
@@ -409,12 +420,13 @@ class BaseSoC(SoCCore, AutoDoc):
 
         # Add the 16 MB SPI flash as XIP memory at address 0x03000000
         if not is_sim:
-            # flash = SpiFlashDualQuad(platform.request("spiflash4x"), dummy=5)
-            # flash.add_clk_primitive(self.platform.device)
-            # self.submodules.lxspi = flash
-            # self.register_mem("spiflash", 0x03000000, self.lxspi.bus, size=16 * 1024 * 1024)
-            self.submodules.picorvspi = flash = PicoRVSpi(self.platform, pads=platform.request("spiflash"), size=16 * 1024 * 1024)
-            self.register_mem("spiflash", self.mem_map["spiflash"], self.picorvspi.bus, size=self.picorvspi.size)
+            flash = SpiFlashDualQuad(platform.request("spiflash4x"), dummy=6, endianness="little")
+            flash.add_clk_primitive(self.platform.device)
+            self.submodules.lxspi = flash
+            self.register_mem("spiflash", self.mem_map["spiflash"], self.lxspi.bus, size=16 * 1024 * 1024)
+            # self.submodules.picorvspi = flash = PicoRVSpi(self.platform, pads=platform.request("spiflash"), size=16 * 1024 * 1024)
+            # self.register_mem("spiflash", self.mem_map["spiflash"], self.picorvspi.bus, size=self.picorvspi.size)
+            self.add_constant("ROM_BOOT_ADDRESS", self.mem_map["spiflash"] + 0x300000)
 
         # # Add the 16 MB SPI RAM at address 0x40000000 # Value at 40010000: afbfcfef
         reset_cycles = 2**14-1
@@ -516,6 +528,7 @@ def main():
     )
     builder = Builder(soc, output_dir="build",
                             csr_csv="build/csr.csv",
+                            csr_json="build/csr.json",
                             compile_software=compile_software,
                             compile_gateware=compile_gateware)
     # # If we comile software, pull the code from somewhere other than
@@ -527,7 +540,9 @@ def main():
     #     ]
     vns = builder.build()
     soc.do_exit(vns)
+
     lxsocdoc.generate_docs(soc, builder.output_dir + "/documentation", project_name="Hack a Day Supercon 2019 Badge", author="Sean \"xobs\" Cross")
+    lxsocdoc.generate_svd(soc, "build/software", vendor="Foosn", name="Fomu", description="Hack a Day Supercon 2019 Badge")
 
 if __name__ == "__main__":
     main()
